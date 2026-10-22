@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.codexgui"
-version = "1.0"
+version = "2.0"
 
 repositories {
     mavenCentral()
@@ -19,9 +19,13 @@ repositories {
 
 dependencies {
     implementation("javazoom:jlayer:1.0.1")
+    implementation(project(":shared-core"))
+    implementation("org.eclipse.jgit:org.eclipse.jgit:7.3.0.202506031305-r") { isTransitive = false }
 
     intellijPlatform {
         intellijIdeaCommunity("2024.3.7")
+        bundledModule("intellij.platform.vcs.impl")
+        bundledPlugin("PerforceDirectPlugin")
         pluginVerifier()
         zipSigner()
     }
@@ -92,6 +96,7 @@ intellijPlatform {
         description = """
             <p>CodeDeck is a native Codex and Claude Code CLI interface for JetBrains IDEs.</p>
             <p>面向 JetBrains IDE 的 Codex / Claude Code 图形界面。</p>
+            <p>内置 ChangeList 变更树、Git/Perforce 原生 Diff、文件操作与 AI 注释，统一安装和配置。</p>
             <p>连接 Codex app-server 与 Claude Code CLI，不注入第三方隐藏提示词。</p>
         """.trimIndent()
 
@@ -124,7 +129,13 @@ tasks {
     }
 
     check {
-        dependsOn(frontendTypecheck, frontendTest, frontendBrowserTest, frontendBundle)
+        dependsOn(
+            frontendTypecheck,
+            frontendTest,
+            frontendBrowserTest,
+            frontendBundle,
+            ":shared-core:check"
+        )
     }
 
     test {

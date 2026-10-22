@@ -68,6 +68,7 @@ public final class ConversationChangeTracker implements Disposable {
     private final Path root;
     private final WorkspacePathPolicy pathPolicy;
     private final Map<String, LinkedHashMap<Path, Baseline>> baselinesBySession = new LinkedHashMap<>();
+    private final Map<String, CommandFileCapture> commandsBySession = new LinkedHashMap<>();
     private final CopyOnWriteArrayList<Consumer<ChangeUpdate>> listeners = new CopyOnWriteArrayList<>();
 
     public ConversationChangeTracker(Project project) {
@@ -101,6 +102,33 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     Path resolveWorkspacePath(String reportedPath) { return resolveReportedPath(reportedPath); }
+
+    public synchronized void commandStarted(String sessionId, String id, String command, String cwd) {
+        commandsBySession.computeIfAbsent(sessionKey(sessionId), ignored -> new CommandFileCapture(root))
+            .started(id, command, cwd);
+    }
+
+    public synchronized void commandCompleted(String sessionId, String id) {
+        var capture = commandsBySession.get(sessionKey(sessionId));
+        if (capture != null) importCommandChanges(sessionKey(sessionId), capture.completed(id));
+    }
+
+    public synchronized void finishCommands(String sessionId) {
+        var capture = commandsBySession.remove(sessionKey(sessionId));
+        if (capture != null) importCommandChanges(sessionKey(sessionId), capture.finish());
+    }
+
+    private void importCommandChanges(String sessionId, List<CommandFileCapture.Before> changes) {
+        if (changes.isEmpty()) return;
+        var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
+        for (var before : changes) {
+            baselines.putIfAbsent(before.path(), new Baseline(
+                before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
+                before.bytes(), hash(before.bytes()), null));
+        }
+        // Already tracked files need an update too, even when their first baseline is retained.
+        fireChanged(sessionId);
+    }
 
     public synchronized void trackProviderDiff(String sessionId, String unifiedDiff) {
         trackProviderDiff(sessionId, null, unifiedDiff);
@@ -178,6 +206,8 @@ public final class ConversationChangeTracker implements Disposable {
 
     public synchronized void acceptAll(String sessionId) {
         var key = sessionKey(sessionId);
+        var capture = commandsBySession.get(key);
+        if (capture != null) capture.clear();
         baselinesBySession.remove(key);
         fireChanged(key);
     }
@@ -200,6 +230,8 @@ public final class ConversationChangeTracker implements Disposable {
         for (var entry : List.copyOf(baselines.entrySet())) {
             try {
                 restore(entry.getKey(), entry.getValue());
+                var capture = commandsBySession.get(key);
+                if (capture != null) capture.forget(entry.getKey());
                 baselines.remove(entry.getKey());
                 refresh(entry.getKey());
             } catch (IOException error) {
@@ -213,6 +245,7 @@ public final class ConversationChangeTracker implements Disposable {
 
     public synchronized void clearSession(String sessionId) {
         var key = sessionKey(sessionId);
+        commandsBySession.remove(key);
         baselinesBySession.remove(key);
         fireChanged(key);
     }
@@ -271,6 +304,8 @@ public final class ConversationChangeTracker implements Disposable {
 
     private void removeBaseline(String sessionId, Path path) {
         if (path == null) return;
+        var capture = commandsBySession.get(sessionId);
+        if (capture != null) capture.forget(path);
         var baselines = baselinesBySession.get(sessionId);
         if (baselines == null || baselines.remove(path) == null) return;
         if (baselines.isEmpty()) baselinesBySession.remove(sessionId);
@@ -294,6 +329,8 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     private CurrentContent readCurrent(Path path) {
+        // VFS can still hold the old Document after a shell deletion; disk existence is authoritative.
+        if (!Files.isRegularFile(path)) return new CurrentContent(false, null, null);
         var documentBytes = readDocument(path);
         if (documentBytes != null) return content(documentBytes);
         return readDiskCurrent(path);
@@ -313,8 +350,10 @@ public final class ConversationChangeTracker implements Disposable {
         if (project == null || ApplicationManager.getApplication() == null) return null;
         var file = LocalFileSystem.getInstance().findFileByNioFile(path);
         if (file == null) return null;
-        var document = FileDocumentManager.getInstance().getDocument(file);
-        if (document == null) return null;
+        var manager = FileDocumentManager.getInstance();
+        var document = manager.getCachedDocument(file);
+        // Saved Documents can lag behind a CLI write. Only unsaved editor text overrides disk contents.
+        if (document == null || !manager.isDocumentUnsaved(document)) return null;
         return ApplicationManager.getApplication().runReadAction(
             (Computable<byte[]>) () -> document.getText().getBytes(StandardCharsets.UTF_8));
     }
@@ -472,6 +511,7 @@ public final class ConversationChangeTracker implements Disposable {
 
     @Override
     public synchronized void dispose() {
+        commandsBySession.clear();
         baselinesBySession.clear();
         listeners.clear();
     }

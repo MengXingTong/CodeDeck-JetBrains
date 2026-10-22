@@ -46,8 +46,7 @@ public final class CodexConversationProvider implements ConversationProvider, Co
                 .thenApply(result -> result.getAsJsonObject("thread").get("id").getAsString())
             : java.util.concurrent.CompletableFuture.completedFuture(request.conversationId());
         thread.thenCompose(threadId -> {
-            activeTurns.put(handle, new ActiveTurn(threadId, "", sink));
-            sink.accept(new TurnEvent.Started(handle, threadId, ""));
+            registerTurn(handle, threadId, sink);
             return service.startTurn(
                 threadId,
                 request.input(),
@@ -74,6 +73,11 @@ public final class CodexConversationProvider implements ConversationProvider, Co
             return null;
         });
         return handle;
+    }
+
+    void registerTurn(TurnHandle handle, String threadId, TurnEventSink sink) {
+        activeTurns.put(handle, new ActiveTurn(threadId, "", sink));
+        sink.accept(new TurnEvent.Started(handle, threadId, ""));
     }
 
     @Override
@@ -125,8 +129,22 @@ public final class CodexConversationProvider implements ConversationProvider, Co
             case "item/fileChange/patchUpdated" -> item(handle, TurnEvent.Item.Phase.UPDATED, params);
             case "turn/diff/updated" -> new TurnEvent.Change(handle, string(params, "diff", ""));
             case "thread/tokenUsage/updated" -> usage(handle, params);
-            case "turn/completed" -> new TurnEvent.Completed(handle, string(params, "threadId", ""), "", "");
-            case "error" -> new TurnEvent.Failed(handle, new IllegalStateException(string(params, "message", params.toString())), false);
+            case "turn/completed" -> {
+                var turn = object(params, "turn");
+                var status = string(turn, "status", "completed");
+                if (status.equals("failed")) {
+                    yield new TurnEvent.Failed(handle, new IllegalStateException(CodexError.from(turn).message()), false);
+                }
+                if (status.equals("interrupted")) {
+                    yield new TurnEvent.Failed(handle, new java.util.concurrent.CancellationException("Codex 回合已停止"), true);
+                }
+                yield new TurnEvent.Completed(handle, string(params, "threadId", ""), "", "");
+            }
+            case "error" -> {
+                var error = CodexError.from(params);
+                yield error.willRetry() ? new TurnEvent.Notice(handle, error.message())
+                    : new TurnEvent.Failed(handle, new IllegalStateException(error.message()), false);
+            }
             default -> null;
         };
     }

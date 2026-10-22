@@ -1,0 +1,16 @@
+// Opt-in native IDE fixtures. Keep the full IntelliJ test framework out of ordinary unit tests.
+allprojects {
+    afterEvaluate {
+        if (path == ':') {
+            dependencies { testImplementation 'junit:junit:4.13.2' }
+            tasks.named('test') {
+                if (System.getenv('CODEDECK_REAL_IDE_DND') == '1') systemProperty 'java.awt.headless', 'false'
+                def platformLibrary = classpath.files.find { entry ->
+                    entry.parentFile != null && new File(entry.parentFile, 'testFramework.jar').isFile()
+                }
+                if (platformLibrary == null) throw new GradleException('IntelliJ testFramework.jar was not found beside the platform libraries')
+                classpath += files(new File(platformLibrary.parentFile, 'testFramework.jar'))
+            }
+        }
+    }
+}

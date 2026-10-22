@@ -13,13 +13,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-final class UnifiedDiffParser {
+public final class UnifiedDiffParser {
     private static final Pattern HUNK_HEADER = Pattern.compile(
         "^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*$");
 
     private UnifiedDiffParser() {}
 
-    static Map<String, String> split(String diff) {
+    public static Map<String, String> split(String diff) {
         var result = new LinkedHashMap<String, String>();
         String currentPath = null;
         var current = new StringBuilder();
@@ -36,7 +36,7 @@ final class UnifiedDiffParser {
         return result;
     }
 
-    static List<ParsedFileDiff> parse(String diff, Map<String, byte[]> afterContents) {
+    public static List<ParsedFileDiff> parse(String diff, Map<String, byte[]> afterContents) {
         var result = new ArrayList<ParsedFileDiff>();
         for (var entry : split(diff).entrySet()) {
             var path = entry.getKey();
@@ -174,7 +174,7 @@ final class UnifiedDiffParser {
         return "\n";
     }
 
-    record ParsedFileDiff(
+    public record ParsedFileDiff(
         String path,
         ChangeEntry.Kind kind,
         byte[] beforeContent,

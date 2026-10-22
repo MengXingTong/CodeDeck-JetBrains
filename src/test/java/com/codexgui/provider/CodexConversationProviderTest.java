@@ -5,14 +5,17 @@ import com.codexgui.conversation.TurnHandle;
 import com.codexgui.conversation.TurnId;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.codexgui.service.CodexAppServerService;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class CodexConversationProviderTest {
     private final TurnHandle handle = new TurnHandle(new SessionId("session-a"), new TurnId("local-turn"), 3);
@@ -61,6 +64,91 @@ final class CodexConversationProviderTest {
 
         assertEquals(1250, event.usedTokens());
         assertEquals(10000, event.maxTokens());
+    }
+
+    @Test
+    void keepsReceivingTheSameTurnAfterAnAutomaticReconnect() {
+        var service = new CodexAppServerService(null);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.registerTurn(handle, "thread-a", events::add);
+            provider.onNotification("turn/started", params("""
+                {"threadId":"thread-a","turn":{"id":"turn-a"}}
+                """));
+            provider.onNotification("error", params("""
+                {"threadId":"thread-a","turnId":"turn-a","willRetry":true,
+                "error":{"message":"Reconnecting... 2/5","additionalDetails":"tls handshake eof"}}
+                """));
+            provider.onNotification("item/agentMessage/delta", params("""
+                {"threadId":"thread-a","turnId":"turn-a","itemId":"message-a","delta":"恢复后的回复"}
+                """));
+            provider.onNotification("turn/completed", params("""
+                {"threadId":"thread-a","turn":{"id":"turn-a","status":"completed"}}
+                """));
+            provider.onNotification("item/agentMessage/delta", params("""
+                {"threadId":"thread-a","turnId":"turn-a","delta":"迟到事件"}
+                """));
+
+            assertEquals(5, events.size());
+            var notice = assertInstanceOf(TurnEvent.Notice.class, events.get(2));
+            assertEquals(handle, notice.handle());
+            assertEquals("Reconnecting... 2/5\ntls handshake eof", notice.message());
+            assertEquals("恢复后的回复", assertInstanceOf(TurnEvent.Delta.class, events.get(3)).text());
+            assertInstanceOf(TurnEvent.Completed.class, events.get(4));
+        } finally {
+            service.dispose();
+        }
+    }
+
+    @Test
+    void retryForAnotherTurnCannotInterruptTheCurrentTurn() {
+        var service = new CodexAppServerService(null);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.registerTurn(handle, "thread-a", events::add);
+            provider.onNotification("turn/started", params("""
+                {"threadId":"thread-a","turn":{"id":"turn-a"}}
+                """));
+            provider.onNotification("error", params("""
+                {"threadId":"thread-a","turnId":"old-turn","willRetry":true,"error":{"message":"retry"}}
+                """));
+            provider.onNotification("item/agentMessage/delta", params("""
+                {"threadId":"thread-a","turnId":"turn-a","delta":"继续"}
+                """));
+
+            assertEquals(3, events.size());
+            assertEquals("继续", assertInstanceOf(TurnEvent.Delta.class, events.getLast()).text());
+        } finally {
+            service.dispose();
+        }
+    }
+
+    @Test
+    void terminalErrorReadsTheNestedCause() {
+        var event = CodexConversationProvider.decodeNotification(handle, "error", params("""
+            {"willRetry":false,"error":{"message":"重试次数已用完","additionalDetails":"tls handshake eof"}}
+            """));
+
+        var failed = assertInstanceOf(TurnEvent.Failed.class, event);
+        assertEquals("重试次数已用完\ntls handshake eof", failed.error().getMessage());
+    }
+
+    @Test
+    void failedAndInterruptedCompletionNeverReportSuccess() {
+        var failed = assertInstanceOf(TurnEvent.Failed.class,
+            CodexConversationProvider.decodeNotification(handle, "turn/completed", params("""
+                {"turn":{"status":"failed","error":{"message":"连接失败"}}}
+                """)));
+        assertEquals("连接失败", failed.error().getMessage());
+        var stopped = assertInstanceOf(TurnEvent.Failed.class,
+            CodexConversationProvider.decodeNotification(handle, "turn/completed", params("""
+                {"turn":{"status":"interrupted"}}
+                """)));
+        assertTrue(stopped.cancelled());
+    }
+
+    private static JsonObject params(String json) {
+        return JsonParser.parseString(json).getAsJsonObject();
     }
 
     private TurnEvent decode(String line) {

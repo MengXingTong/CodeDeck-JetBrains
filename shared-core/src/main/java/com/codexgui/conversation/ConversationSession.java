@@ -3,7 +3,6 @@ package com.codexgui.conversation;
 import com.codexgui.model.Attachment;
 import com.codexgui.model.ConversationEntry;
 import com.codexgui.model.FileReference;
-import com.codexgui.settings.CodexSettingsState;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,13 +16,14 @@ public final class ConversationSession {
     private String providerTurnId;
     private TurnHandle activeTurn;
     private long generation;
-    private String provider = CodexSettingsState.CODEX_CHANNEL;
-    private String providerProfileId = CodexSettingsState.CODEX_LOCAL_PROVIDER_ID;
+    private String provider = "codex";
+    private String providerProfileId = "codex-local";
     private int providerRevision = 1;
     private String title = "新会话";
     private String pendingUserBody;
     private int pendingUserMessageCount;
     private boolean busy;
+    private boolean historyReadOnly;
     private long usageUsedTokens;
     private long usageMaxTokens;
     private final List<Attachment> attachments = new ArrayList<>();
@@ -55,6 +55,8 @@ public final class ConversationSession {
     public void pendingUserMessageCount(int value) { pendingUserMessageCount = value; }
     public boolean busy() { return busy; }
     public void busy(boolean value) { busy = value; }
+    public boolean historyReadOnly() { return historyReadOnly; }
+    public void historyReadOnly(boolean value) { historyReadOnly = value; }
     public long usageUsedTokens() { return usageUsedTokens; }
     public void usageUsedTokens(long value) { usageUsedTokens = value; }
     public long usageMaxTokens() { return usageMaxTokens; }
@@ -113,6 +115,7 @@ public final class ConversationSession {
 
     public void clearConversation() {
         threadId = null;
+        historyReadOnly = false;
         generation++;
         activeTurn = null;
         providerTurnId = null;

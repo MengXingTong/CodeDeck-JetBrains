@@ -186,6 +186,29 @@ test('AI 本地文件链接支持跳转编辑器并通过右键在资源管理�
   await expect(menu).toHaveCount(0);
 });
 
+test('AI 回复中的 file URI 链接只触发编辑器跳转', async ({page}) => {
+  await openEditor(page, false);
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('message', {
+    entry: {
+      kind: 'assistant',
+      title: 'Codex',
+      itemId: 'file-uri-link',
+      body: '[PvpBattleGameMode.h](file:///D:/Project/Source/PvpBattleGameMode.h)',
+    },
+  }) as never));
+
+  const link = page.locator('.file-link', {hasText: 'PvpBattleGameMode.h'});
+  await link.click();
+
+  const sent = await page.evaluate(() => (window as Window & {
+    previewLastMessage?: {type: string; payload: {path: string; line?: number; column?: number}};
+  }).previewLastMessage);
+  expect(sent).toMatchObject({
+    type: 'openFile',
+    payload: {path: 'D:/Project/Source/PvpBattleGameMode.h', line: 1, column: 1},
+  });
+});
+
 test('连续文件标签两侧的左右方向键始终推进一个逻辑位置', async ({page}) => {
   const editor = await openEditor(page);
   await seedNavigationDocument(editor);
@@ -285,6 +308,23 @@ test('文件补全与混合剪贴板使用异步书签恢复到原位置', async
   await editor.press('Control+v');
   await expect(editor.locator('[data-file-reference]')).toHaveCount(2);
   expect(await serializeEditor(editor)).toBe(`左${marker}中${marker}右后续`);
+});
+
+test('文件标签与文字混合内容可在保留原文时整段复制粘贴', async ({page}) => {
+  const editor = await openEditor(page);
+  await editor.press('Home');
+  await editor.pressSequentially('前缀');
+  await editor.press('End');
+  await editor.pressSequentially('后缀');
+  const original = await serializeEditor(editor);
+  await editor.press('Control+a');
+  await editor.press('Control+c');
+  await editor.press('Backspace');
+  await expect(editor.locator('[data-file-reference]')).toHaveCount(0);
+  await editor.press('Control+v');
+
+  await expect(editor.locator('[data-file-reference]')).toHaveCount(3);
+  expect(await serializeEditor(editor)).toBe(original);
 });
 
 test('粘贴行内代码包裹的 Unreal 源码路径和函数名时生成文件标签', async ({page}) => {

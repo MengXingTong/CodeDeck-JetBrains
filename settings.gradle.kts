@@ -6,3 +6,4 @@ pluginManagement {
 }
 
 rootProject.name = "CodeDeck"
+include("shared-core")

@@ -3,7 +3,6 @@ package com.codexgui.service;
 import com.codexgui.model.Attachment;
 import com.codexgui.model.FileReference;
 import com.codexgui.settings.CodexSettingsState;
-import com.codexgui.settings.ProviderCredentialStore;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -25,7 +24,11 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.function.BiFunction;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -169,17 +172,7 @@ public final class CodexAppServerService implements Disposable {
         try {
             var command = createCommand(executable, provider);
             var builder = new ProcessBuilder(command);
-            // JetBrains 进程的环境变量可能早于 Codex Desktop 启动，显式指定配置目录，确保读取同一份 config.toml/auth.json。
-            var codexHome = System.getenv("CODEX_HOME");
-            if (codexHome == null || codexHome.isBlank()) {
-                codexHome = Path.of(System.getProperty("user.home", "."), ".codex").toString();
-            }
-            builder.environment().put("CODEX_HOME", codexHome);
-            if (!provider.builtIn()) {
-                var apiKey = ProviderCredentialStore.get(provider.id());
-                if (apiKey == null || apiKey.isBlank()) throw new IllegalStateException("当前 GPT 供应商尚未配置 API 密钥");
-                builder.environment().put("CODEX_GUI_PROVIDER_KEY", apiKey);
-            }
+            CodexProviderConfiguration.applyEnvironment(builder, provider);
             if (project.getBasePath() != null) builder.directory(Path.of(project.getBasePath()).toFile());
             var process = builder.start();
             var startedContext = new ProcessContext(
@@ -205,7 +198,7 @@ public final class CodexAppServerService implements Disposable {
             var clientInfo = new JsonObject();
             clientInfo.addProperty("name", "codedeck-jetbrains");
             clientInfo.addProperty("title", "CodeDeck for JetBrains");
-            clientInfo.addProperty("version", "1.0");
+            clientInfo.addProperty("version", "2.0");
             var params = new JsonObject();
             params.add("clientInfo", clientInfo);
             params.add("capabilities", capabilities);
@@ -271,46 +264,64 @@ public final class CodexAppServerService implements Disposable {
     }
 
     static List<String> createCommand(String executable, CodexSettingsState.ProviderProfileSnapshot provider) {
-        var arguments = new java.util.ArrayList<String>();
-        if (!provider.builtIn()) {
-            arguments.add("-c");
-            arguments.add("model_provider=\"codex_gui\"");
-            arguments.add("-c");
-            arguments.add("model_providers.codex_gui.name=" + tomlString(provider.name()));
-            arguments.add("-c");
-            arguments.add("model_providers.codex_gui.base_url=" + tomlString(provider.baseUrl()));
-            arguments.add("-c");
-            arguments.add("model_providers.codex_gui.env_key=\"CODEX_GUI_PROVIDER_KEY\"");
-            arguments.add("-c");
-            arguments.add("model_providers.codex_gui.wire_api=" + tomlString(provider.wireApi()));
-        }
+        var arguments = new java.util.ArrayList<>(CodexProviderConfiguration.arguments(provider));
         arguments.add("app-server");
         arguments.add("--stdio");
 
         return ExecutableCommand.build(executable, arguments);
     }
 
-    private static String tomlString(String value) {
-        var escaped = Objects.requireNonNullElse(value, "")
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\r", "\\r")
-            .replace("\n", "\\n");
-        return "\"" + escaped + "\"";
-    }
-
     public CompletableFuture<JsonObject> listThreads(String searchTerm) {
-        return request("thread/list", threadListParams(project.getBasePath(), searchTerm));
+        return listThreadPages(threadListParams(searchTerm), params -> request("thread/list", params));
     }
 
-    static JsonObject threadListParams(String basePath, String searchTerm) {
+    static JsonObject threadListParams(String searchTerm) {
         var params = new JsonObject();
         params.addProperty("limit", 100);
         params.addProperty("sortKey", "updated_at");
         params.addProperty("sortDirection", "desc");
-        if (basePath != null) params.addProperty("cwd", basePath);
+        // 省略 sourceKinds 会使用服务端默认来源，无法保证跨客户端历史完整。
+        var sources = new JsonArray();
+        List.of("cli", "vscode", "appServer", "exec", "unknown").forEach(sources::add);
+        params.add("sourceKinds", sources);
         if (searchTerm != null && !searchTerm.isBlank()) params.addProperty("searchTerm", searchTerm.trim());
         return params;
+    }
+
+    static CompletableFuture<JsonObject> listThreadPages(
+        JsonObject params, Function<JsonObject, CompletableFuture<JsonObject>> requestPage
+    ) {
+        return collectThreadPages(params.deepCopy(), requestPage, new JsonArray(), new JsonObject(), new HashSet<>(), new HashSet<>());
+    }
+
+    private static CompletableFuture<JsonObject> collectThreadPages(
+        JsonObject params, Function<JsonObject, CompletableFuture<JsonObject>> requestPage,
+        JsonArray threads, JsonObject result, Set<String> seenIds, Set<String> seenCursors
+    ) {
+        return requestPage.apply(params.deepCopy()).thenCompose(page -> {
+            if (result.size() == 0) page.entrySet().stream()
+                .filter(entry -> !entry.getKey().equals("data") && !entry.getKey().equals("nextCursor"))
+                .forEach(entry -> result.add(entry.getKey(), entry.getValue()));
+            var data = page.getAsJsonArray("data");
+            if (data != null) for (var element : data) {
+                if (!element.isJsonObject()) continue;
+                var thread = element.getAsJsonObject();
+                if (!thread.has("id") || thread.get("id").isJsonNull()) continue;
+                if (seenIds.add(thread.get("id").getAsString())) threads.add(thread);
+            }
+            var nextCursor = page.has("nextCursor") && !page.get("nextCursor").isJsonNull()
+                ? page.get("nextCursor").getAsString() : "";
+            if (nextCursor.isBlank()) {
+                result.add("data", threads);
+                result.add("nextCursor", com.google.gson.JsonNull.INSTANCE);
+                return CompletableFuture.completedFuture(result);
+            }
+            if (!seenCursors.add(nextCursor) || seenCursors.size() > 1000) {
+                return CompletableFuture.failedFuture(new IOException("Codex 历史分页游标重复或超过分页上限"));
+            }
+            params.addProperty("cursor", nextCursor);
+            return collectThreadPages(params, requestPage, threads, result, seenIds, seenCursors);
+        });
     }
 
     public CompletableFuture<JsonObject> listModels() {
@@ -390,21 +401,69 @@ public final class CodexAppServerService implements Disposable {
         });
     }
 
+    public CompletableFuture<JsonObject> openHistoryThread(String threadId) {
+        return openHistoryThread(threadId, this::request);
+    }
+
+    static CompletableFuture<JsonObject> openHistoryThread(
+        String threadId, BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request
+    ) {
+        var params = new JsonObject();
+        params.addProperty("threadId", threadId);
+        params.addProperty("excludeTurns", true);
+        return request.apply("thread/resume", params).handle((result, error) -> {
+            if (error == null) {
+                result.addProperty("historyReadOnly", false);
+                return CompletableFuture.completedFuture(result);
+            }
+            var cause = error;
+            while (cause instanceof java.util.concurrent.CompletionException && cause.getCause() != null) {
+                cause = cause.getCause();
+            }
+            // 只对写入权冲突降级；认证、连接和其他协议错误保留原始失败。
+            if (cause.getMessage() == null
+                || !cause.getMessage().contains("thread " + threadId + " already has an active writer")) {
+                return CompletableFuture.<JsonObject>failedFuture(cause);
+            }
+            var readParams = new JsonObject();
+            readParams.addProperty("threadId", threadId);
+            readParams.addProperty("includeTurns", false);
+            return request.apply("thread/read", readParams).thenApply(snapshot -> {
+                snapshot.addProperty("historyReadOnly", true);
+                return snapshot;
+            });
+        }).thenCompose(Function.identity()).thenCompose(result -> {
+            var turns = new JsonArray();
+            return listThreadTurns(threadId, null, turns, request).thenApply(ignored -> {
+                var thread = result.getAsJsonObject("thread");
+                if (thread != null) thread.add("turns", turns);
+                return result;
+            });
+        });
+    }
+
     private CompletableFuture<Void> listThreadTurns(String threadId, String cursor, JsonArray turns) {
+        return listThreadTurns(threadId, cursor, turns, this::request);
+    }
+
+    private static CompletableFuture<Void> listThreadTurns(
+        String threadId, String cursor, JsonArray turns,
+        BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request
+    ) {
         var params = new JsonObject();
         params.addProperty("threadId", threadId);
         params.addProperty("limit", 100);
         params.addProperty("sortDirection", "asc");
         params.addProperty("itemsView", "full");
         if (cursor != null && !cursor.isBlank()) params.addProperty("cursor", cursor);
-        return request("thread/turns/list", params).thenCompose(result -> {
+        return request.apply("thread/turns/list", params).thenCompose(result -> {
             // 按升序逐页合并完整 turn，保证历史消息顺序与原会话一致。
             var data = result.getAsJsonArray("data");
             if (data != null) data.forEach(turns::add);
             var nextCursor = result.has("nextCursor") && !result.get("nextCursor").isJsonNull()
                 ? result.get("nextCursor").getAsString() : "";
             if (nextCursor.isBlank()) return CompletableFuture.completedFuture(null);
-            return listThreadTurns(threadId, nextCursor, turns);
+            return listThreadTurns(threadId, nextCursor, turns, request);
         });
     }
 
@@ -458,11 +517,16 @@ public final class CodexAppServerService implements Disposable {
     }
 
     public CompletableFuture<JsonObject> listMcpServers(String threadId) {
+        return request("mcpServerStatus/list", mcpServerListParams(threadId));
+    }
+
+    static JsonObject mcpServerListParams(String threadId) {
         var params = new JsonObject();
         params.addProperty("limit", 100);
-        params.addProperty("detail", "full");
-        if (threadId != null) params.addProperty("threadId", threadId);
-        return request("mcpServerStatus/list", params);
+        // 设置页只展示工具和认证状态；完整清单还会等待各服务器枚举资源。
+        params.addProperty("detail", "toolsAndAuthOnly");
+        if (threadId != null && !threadId.isBlank()) params.addProperty("threadId", threadId);
+        return params;
     }
 
     public CompletableFuture<JsonObject> reloadMcpServers() {
@@ -509,11 +573,7 @@ public final class CodexAppServerService implements Disposable {
         if (effort != null && !effort.isBlank()) params.addProperty("effort", effort);
         if (serviceTier != null && !serviceTier.isBlank() && !Objects.equals(serviceTier, "standard")) params.addProperty("serviceTier", serviceTier);
         params.add("sandboxPolicy", sandboxPolicy(sandboxMode, approvalPolicy));
-        var input = new JsonArray();
-        addTextAndFileReferences(input, text, fileReferences);
-        // 附件继续保持原有输入类型。
-        for (var attachment : attachments) input.add(attachmentInput(attachment));
-        params.add("input", input);
+        params.add("input", turnInput(text, attachments, fileReferences));
         return request("turn/start", params);
     }
 
@@ -527,15 +587,18 @@ public final class CodexAppServerService implements Disposable {
         var params = new JsonObject();
         params.addProperty("threadId", threadId);
         params.addProperty("expectedTurnId", expectedTurnId);
-        var input = new JsonArray();
-        addTextAndFileReferences(input, text, fileReferences);
-        // 引导消息沿用普通回合的附件结构，确保图片和文件引用语义一致。
-        for (var attachment : attachments) input.add(attachmentInput(attachment));
-        params.add("input", input);
+        params.add("input", turnInput(text, attachments, fileReferences));
         return request("turn/steer", params);
     }
 
-    private void addTextAndFileReferences(JsonArray input, String text, List<FileReference> fileReferences) {
+    static JsonArray turnInput(String text, List<Attachment> attachments, List<FileReference> fileReferences) {
+        var input = new JsonArray();
+        addTextAndFileReferences(input, text, fileReferences);
+        for (var attachment : attachments) input.add(attachmentInput(attachment));
+        return input;
+    }
+
+    private static void addTextAndFileReferences(JsonArray input, String text, List<FileReference> fileReferences) {
         var parts = Objects.requireNonNullElse(text, "").split(FILE_REFERENCE_MARKER, -1);
         var embeddedCount = Math.min(fileReferences.size(), Math.max(0, parts.length - 1));
         for (var index = 0; index < parts.length; index++) {
@@ -548,7 +611,7 @@ public final class CodexAppServerService implements Disposable {
         }
     }
 
-    private JsonObject textInput(String text) {
+    private static JsonObject textInput(String text) {
         var input = new JsonObject();
         input.addProperty("type", "text");
         input.addProperty("text", text);
@@ -570,7 +633,7 @@ public final class CodexAppServerService implements Disposable {
         writeMessage(requireReadyContext(), response);
     }
 
-    private JsonObject attachmentInput(Attachment attachment) {
+    private static JsonObject attachmentInput(Attachment attachment) {
         var input = new JsonObject();
         switch (attachment.kind()) {
             case IMAGE -> {
@@ -578,20 +641,15 @@ public final class CodexAppServerService implements Disposable {
                 input.addProperty("path", attachment.path().toAbsolutePath().toString());
             }
             case FILE -> {
-                input.addProperty("type", "mention");
-                input.addProperty("name", attachment.name());
-                input.addProperty("path", attachment.path().toAbsolutePath().toString());
+                return textInput(FileReferenceText.format(attachment.path()));
             }
         }
         return input;
     }
 
-    private JsonObject fileReferenceInput(FileReference reference) {
-        var input = new JsonObject();
-        input.addProperty("type", "mention");
-        input.addProperty("name", reference.name());
-        input.addProperty("path", reference.path().toAbsolutePath().normalize().toString());
-        return input;
+    private static JsonObject fileReferenceInput(FileReference reference) {
+        // Native mention items do not place local paths in the model-visible user message.
+        return textInput(FileReferenceText.format(reference.path()));
     }
 
     static JsonObject sandboxPolicy(String mode, String approvalPolicy) {
@@ -618,6 +676,12 @@ public final class CodexAppServerService implements Disposable {
         var activeContext = requireReadyContext();
         var timeoutSeconds = timeoutSeconds(method);
         return request(activeContext, method, params, timeoutSeconds);
+    }
+
+    BiFunction<String, JsonObject, CompletableFuture<JsonObject>> scopedRequests() {
+        var activeContext = requireReadyContext();
+        // 后台标题请求必须绑定当前供应商进程，切换供应商后不能续发到新连接。
+        return (method, params) -> request(activeContext, method, params, timeoutSeconds(method));
     }
 
     static long timeoutSeconds(String method) {

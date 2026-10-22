@@ -99,6 +99,34 @@ describe('PromptEditor 文档模型', () => {
 });
 
 describe('PromptEditor 引用事务', () => {
+  it('JCEF 拒绝自定义剪贴板类型时仍先写入混合内容 HTML', () => {
+    const {editor} = createEditor({
+      segments: [
+        {type: 'text', text: '前'},
+        {type: 'reference', referenceId: firstReference.id},
+        {type: 'text', text: '后'},
+      ],
+      anchor: 0,
+      head: 3,
+    }, [firstReference]);
+    const written = new Map<string, string>();
+    const event = new Event('copy', {bubbles: true, cancelable: true});
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        setData: (type: string, value: string) => {
+          if (type === 'application/x-codex-file-references') throw new DOMException('不支持自定义类型');
+          written.set(type, value);
+        },
+      },
+    });
+
+    editor.element.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(written.get('text/plain')).toBe(`前@${firstReference.path} 后`);
+    expect(written.get('text/html')).toContain('data-codex-file-references');
+  });
+
   it('粘贴路径后的成员描述时只把有效文件路径转换为引用', () => {
     const path = 'D:\\devmain\\_server\\UnrealEngine\\Projects\\JinYongPVP\\Source\\JinYongPVP\\GUI\\SkillButtonWidgets\\PropButtonItem.h';
     const {editor, callbacks} = createEditor({segments: [], anchor: 0, head: 0});

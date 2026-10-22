@@ -13,6 +13,7 @@ public sealed interface TurnEvent permits
     TurnEvent.Item,
     TurnEvent.Change,
     TurnEvent.Usage,
+    TurnEvent.Notice,
     TurnEvent.Completed,
     TurnEvent.Failed {
 
@@ -83,6 +84,13 @@ public sealed interface TurnEvent permits
             Objects.requireNonNull(handle, "handle");
             usedTokens = Math.max(0, usedTokens);
             maxTokens = Math.max(0, maxTokens);
+        }
+    }
+
+    record Notice(TurnHandle handle, String message) implements TurnEvent {
+        public Notice {
+            Objects.requireNonNull(handle, "handle");
+            message = Objects.requireNonNullElse(message, "");
         }
     }
 

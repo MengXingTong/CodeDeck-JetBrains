@@ -1,0 +1,8 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <projectService serviceInterface="com.codexgui.changelist.vcs.UnopenedChanges"
+                        serviceImplementation="com.codexgui.changelist.vcs.PerforceUnopenedChanges"/>
+        <projectService serviceInterface="com.codexgui.changelist.vcs.FileVcsOperations"
+                        serviceImplementation="com.codexgui.changelist.vcs.PerforceFileOperations"/>
+    </extensions>
+</idea-plugin>

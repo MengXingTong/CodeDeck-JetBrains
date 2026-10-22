@@ -211,6 +211,72 @@ final class ConversationChangeTrackerTest {
         assertEquals(path, updates.getFirst().changes().getFirst().path());
     }
 
+    @Test
+    void shellWritesAndDeletionPublishReversibleChangesWithoutProviderDiffs() throws IOException {
+        var modified = write("changed.cpp", "\ufeffbefore\r\n");
+        var deleted = write("deleted.cpp", "restore me\r\n");
+        var tracker = new ConversationChangeTracker(root);
+        var updates = new ArrayList<ConversationChangeTracker.ChangeUpdate>();
+        tracker.addListener(updates::add);
+        tracker.commandStarted("session", "cmd", "Set-Content 'changed.cpp' 'after'; Remove-Item 'deleted.cpp'; Set-Content 'new.cpp' 'new'", root.toString());
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        Files.writeString(modified, "after\n"); Files.delete(deleted); write("new.cpp", "new\n");
+        tracker.commandCompleted("session", "cmd");
+
+        assertEquals(3, tracker.listSummaries("session").size());
+        assertTrue(tracker.listSummaries("other-session").isEmpty());
+        var details = tracker.readDetails("session", deleted);
+        assertEquals(ChangeEntry.Kind.DELETED, details.kind());
+        assertArrayEquals(bytes("restore me\r\n"), details.beforeContent());
+        assertEquals(null, details.afterContent());
+        assertTrue(details.unifiedDiff().contains("+++ /dev/null"));
+        assertEquals(1, tracker.listSummaries("session").stream().filter(c -> c.kind() == ChangeEntry.Kind.DELETED).findFirst().orElseThrow().deletedLines());
+        assertFalse(updates.isEmpty());
+        tracker.revertAll("session");
+        assertArrayEquals(bytes("\ufeffbefore\r\n"), Files.readAllBytes(modified));
+        assertArrayEquals(bytes("restore me\r\n"), Files.readAllBytes(deleted));
+        assertFalse(Files.exists(root.resolve("new.cpp")));
+    }
+
+    @Test
+    void shellCaptureRetainsFirstBaselineAcrossCommandsAndFinishesInterruptedCommands() throws IOException {
+        var file = write("file.cpp", "first\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "cmd1", "Set-Content file.cpp second", null);
+        write("file.cpp", "second\n"); tracker.commandCompleted("session", "cmd1");
+        tracker.commandStarted("session", "cmd2", "Remove-Item file.cpp", null); Files.delete(file);
+        tracker.finishCommands("session");
+        assertArrayEquals(bytes("first\n"), tracker.readDetails("session", file).beforeContent());
+        tracker.revert("session", file);
+        assertEquals("first\n", Files.readString(file));
+    }
+
+    @Test
+    void acceptedAndClearedCommandsCannotReappearFromLateCompletions() throws IOException {
+        var file = write("file.cpp", "first\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "cmd1", "Set-Content file.cpp second", null);
+        write("file.cpp", "second\n"); tracker.accept("session", file);
+        tracker.commandCompleted("session", "cmd1");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        tracker.commandStarted("session", "cmd2", "Remove-Item file.cpp", null);
+        tracker.clearSession("session"); Files.delete(file); tracker.commandCompleted("session", "cmd2");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+    }
+
+    @Test
+    void revertedChangesCannotBeReintroducedByAnAlreadyRunningCommand() throws IOException {
+        var file = write("file.cpp", "first\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "cmd1", "Set-Content file.cpp second", null);
+        write("file.cpp", "second\n"); tracker.commandCompleted("session", "cmd1");
+        tracker.commandStarted("session", "cmd2", "Set-Content file.cpp third", null);
+        write("file.cpp", "third\n"); tracker.revertAll("session");
+        tracker.commandCompleted("session", "cmd2");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        assertEquals("first\n", Files.readString(file));
+    }
+
     private Path write(String relativePath, String content) throws IOException {
         var path = root.resolve(relativePath);
         Files.writeString(path, content, StandardCharsets.UTF_8);

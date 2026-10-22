@@ -5,6 +5,7 @@ import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import org.jetbrains.annotations.NotNull;
+import com.intellij.util.messages.Topic;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,6 +18,7 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
     public static final String CLAUDE_CHANNEL = "claude";
     public static final String CODEX_LOCAL_PROVIDER_ID = "codex-local";
     public static final String CLAUDE_LOCAL_PROVIDER_ID = "claude-local";
+    public static final Topic<Runnable> GPT_OPTIONS_CHANGED = Topic.create("CodeDeck GPT inference options", Runnable.class);
 
     public enum ProviderChannel {
         CODEX(CODEX_CHANNEL), CLAUDE(CLAUDE_CHANNEL);
@@ -265,6 +267,15 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
 
     public synchronized void setClaudeModel(String model) {
         state.claudeModel = Objects.requireNonNullElse(model, "");
+    }
+
+    public synchronized void setGptInferenceOptions(String model, String effort, boolean fast) {
+        var profile = activeProvider(CODEX_CHANNEL);
+        var selectedModel = Objects.requireNonNullElse(model, "").strip();
+        if (profile.builtIn) state.model = selectedModel;
+        else profile.model = selectedModel;
+        state.reasoningEffort = ReasoningEffort.from(effort).value();
+        state.serviceTier = (fast ? ServiceTier.FAST : ServiceTier.STANDARD).value();
     }
 
     public ProviderProfile activeProvider(String channel) {

@@ -16,6 +16,7 @@ export interface BridgeState {
   queuedCount?: number;
   title?: unknown;
   threadId?: unknown;
+  historyReadOnly?: boolean;
   history?: unknown[];
   historyProvider?: string;
   customModels?: unknown[];
@@ -86,6 +87,7 @@ export function reduceBridgeEvent(state: BridgeState, event: ReducedEvent): Brid
       state.messages = [];
       state.title = string(event.title) || '新会话';
       state.threadId = event.threadId || null;
+      state.historyReadOnly = false;
       state.usagePercentage = 0;
       state.usageUsedTokens = 0;
       state.usageMaxTokens = 0;
@@ -118,7 +120,12 @@ export function reduceBridgeEvent(state: BridgeState, event: ReducedEvent): Brid
       state.usageMaxTokens = number(event.maxTokens);
       break;
     case 'thread':
+      if (event.titleOnly) {
+        state.title = string(event.title) || state.title;
+        break;
+      }
       state.threadId = event.id || null;
+      state.historyReadOnly = Boolean(event.historyReadOnly);
       state.title = string(event.title) || state.title;
       state.view = 'chat';
       break;

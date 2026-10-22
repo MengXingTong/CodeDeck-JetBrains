@@ -7,11 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-final class CodexExecutableResolver {
+public final class CodexExecutableResolver {
     private CodexExecutableResolver() {
     }
 
-    static String resolve(String configured, boolean windows) {
+    public static String resolve(String configured, boolean windows) {
         var userHome = Path.of(System.getProperty("user.home", "."));
         return resolve(configured, windows, System.getenv(), userHome);
     }

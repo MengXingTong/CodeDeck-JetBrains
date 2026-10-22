@@ -569,9 +569,12 @@ export class PromptEditor {
     if (!payload.referenceIds.length) return false;
     event.preventDefault();
     event.clipboardData?.setData('text/plain', payload.plain);
-    event.clipboardData?.setData('application/x-codex-file-references', JSON.stringify(payload));
     const encoded = encodeURIComponent(JSON.stringify(payload));
     event.clipboardData?.setData('text/html', `<span data-codex-file-references="${encoded.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}">${this.escapeHtml(payload.plain).replace(/\n/g, '<br>')}</span>`);
+    // 部分 JCEF 版本不接受自定义 MIME；HTML 必须先写入，保证混合内容仍能完整恢复。
+    try {
+      event.clipboardData?.setData('application/x-codex-file-references', JSON.stringify(payload));
+    } catch (_) {}
     if (cut) this.view.dispatch(this.view.state.tr.deleteSelection().scrollIntoView());
     return true;
   }

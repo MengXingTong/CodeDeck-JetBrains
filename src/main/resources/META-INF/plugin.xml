@@ -9,8 +9,15 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
+    <depends optional="true" config-file="changelist-perforce.xml">PerforceDirectPlugin</depends>
+    <incompatible-with>dev.p4changelist.toolwindow</incompatible-with>
 
     <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="CodeDeck Changes" anchor="left" secondary="false" order="last"
+                    icon="/icons/changelist.svg" factoryClass="com.codexgui.changelist.ui.VcsToolWindowFactory"/>
+        <projectConfigurable id="com.codexgui.changelist.settings" parentId="com.codexgui.settings"
+                             displayName="ChangeList" instance="com.codexgui.changelist.settings.SidebarConfigurable"/>
         <toolWindow id="CodeDeck"
                     anchor="right"
                     icon="/icons/codex.svg"

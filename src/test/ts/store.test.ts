@@ -9,6 +9,26 @@ import {
 } from '../../main/ts/store';
 
 describe('bridge store', () => {
+  it('updates an automatic thread title without leaving settings or changing conversation state', () => {
+    const state: BridgeState = {messages: [], title: '新会话', threadId: 'thread-a',
+      historyReadOnly: true, busy: true, queuedCount: 2, view: 'settings'};
+    reduceBridgeEvent(state, {type: 'thread', id: 'thread-a', title: '自动生成的标题', titleOnly: true});
+    expect(state).toMatchObject({title: '自动生成的标题', threadId: 'thread-a',
+      historyReadOnly: true, busy: true, queuedCount: 2, view: 'settings'});
+  });
+
+  it('keeps occupied history read-only until a successful reopen or new conversation', () => {
+    const state: BridgeState = {messages: []};
+    reduceBridgeEvent(state, {type: 'thread', id: 'occupied', historyReadOnly: true});
+    expect(state.historyReadOnly).toBe(true);
+    expect(state.view).toBe('chat');
+    reduceBridgeEvent(state, {type: 'thread', id: 'occupied', historyReadOnly: false});
+    expect(state.historyReadOnly).toBe(false);
+    reduceBridgeEvent(state, {type: 'thread', id: 'occupied', historyReadOnly: true});
+    reduceBridgeEvent(state, {type: 'clear'});
+    expect(state.historyReadOnly).toBe(false);
+  });
+
   it('copies session fields without overwriting the tab prompt snapshot', () => {
     const promptSnapshot = [{text: '后台页签草稿'}];
     const tab: Record<string, unknown> = {messages: [], busy: false, promptSnapshot};

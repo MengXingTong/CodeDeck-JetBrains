@@ -1,164 +1,92 @@
-# CodeDeck for JetBrains
+# CodeDeck
 
-CodeDeck 是一个给 JetBrains IDE 使用的 Codex / Claude Code 图形界面插件。它把终端里的 AI 编程助手放进 IDE 工具窗里，保留会话、流式回复、工具执行、审批、文件修改查看和多页签工作流。
+** AI时代的Review神器 For JetBrains。**
 
-当前版本：`1.0`。项目尚未发布到 JetBrains Marketplace，需要通过源码运行或安装本地构建产物。Claude Code 渠道仍缺少充分测试，建议优先在非关键项目中验证后再使用。
+CodeDeck 把变更列表、原生 Diff、AI 讲解和对话放在同一个 IDE 里。无论代码是你写的、同事写的，还是 AI 刚改的，都能对着代码看变化、问原因，再决定留下哪些修改。
 
-## 它适合做什么
+## 能做什么
 
-- 在 IntelliJ IDEA、Rider 等 JetBrains IDE 内直接使用 Codex 或 Claude Code，不来回切终端。
-- 让 AI 修改文件后，在 IDE 内查看 Diff、接受或撤销变更。
-- 同时维护多个独立会话，后台会话可以继续运行，前台输入不会被打断。
-- 通过自定义供应商接入兼容 OpenAI 或 Anthropic 接口的模型服务。
-- 用 Skills、MCP、提示词和 Agent 身份组织更稳定的项目级工作流。
+- **让 AI 给 Diff 逐段打注释。** 点击“AI 注释”，AI 会逐个代码段分析修改，把“改了什么、为什么这样改、会影响什么”直接标在对应代码段旁边。边看差异边读注释，不用在聊天记录和代码之间反复对照。
+- **选中代码，接着问。** 在 Diff 中选一段代码，就能追问逻辑、讨论边界条件，或者让 AI 补测试。文件、行号和选区会一起带过去。
+- **集中审阅项目改动。** 用变更树查看 Git / Perforce 等版本控制中的修改，双击就进 IDE 原生 Diff；也可以批量生成 AI 注释。
+- **逐项确认 AI 写的代码。** 每个对话都有自己的修改列表，支持查看差异、接受和撤销，不用靠聊天回复猜它到底动了哪些文件。
+- **把文件直接拖进聊天。** 从变更树或项目树拖入文件，也可以用 `@` 搜索引用；图片可直接作为附件发送。
+- **几个任务同时做。** 多个对话页签独立运行，支持排队发送；Codex 还可以在执行过程中接收新的引导。
+- **沿用你自己的 AI 配置。** 接入 Codex / Claude Code CLI，也支持自定义供应商、模型、提示词、Agent 身份，以及 Codex 的 Skills 和 MCP。
 
-CodeDeck 不会注入第三方隐藏提示词。全局提示词、共享提示词和 Agent 身份都需要用户主动保存，并且只对新建会话生效。
+## 看起来是什么样
 
-## 核心能力
+以下为 **Checkout Review Demo** 独立 Java 示例项目的实拍，演示购物车折扣、免邮规则和边界测试。
 
-### 会话与输入
+### 从 ChangeList 开始审阅
 
-- 支持 Codex 会话创建、恢复、历史浏览、流式响应和中断。
-- 支持 Claude Code CLI 会话创建、续接、流式响应和工具状态展示。
-- GPT 与 Claude 渠道按页签隔离；切换渠道时会在当前页签开启对应的新会话。
-- 多个页签可以同时运行独立 AI 回合，后台流式输出不会污染当前页签。
-- 输入框支持文本、图片、编辑器选区、项目树拖拽文件和 `@` 文件搜索。
-- 文件引用以稳定标签插入输入框，可选择、删除、拖动排序、撤销重做和跨 IDE 窗口复制粘贴。
-- AI 回复进行中仍可继续发送消息；普通发送会排队，GPT 渠道还支持对当前回合立即引导。
+左边的 **CodeDeck Changes** 按目录列出项目改动，双击文件打开原生 Diff，右边直接讨论代码。找改动、看差异、问原因，在一个工作区里完成。
 
-### 供应商与模型
+![CodeDeck 示例工作区：变更树、原生 Diff 和代码讨论](docs/images/readme/review-workspace.jpg)
 
-- 内置 Codex 与 Claude Code 的本机 CLI 配置。
-- 支持按 GPT / Claude 渠道添加、编辑、启用和删除自定义供应商。
-- GPT 自定义供应商支持 Responses API 或 Chat Completions API。
-- Claude 自定义供应商通过 `ANTHROPIC_BASE_URL` 与 `ANTHROPIC_AUTH_TOKEN` 接入。
-- 启用自定义供应商前会读取模型目录；模型选择器支持添加接口未返回的自定义模型 ID。
-- API 密钥和认证令牌保存到 JetBrains PasswordSafe，不写入插件 XML 或网页层状态。
+### AI 说明直接贴着改动
 
-### 修改捕获与 Diff
+把折扣上限、免邮门槛和计算顺序讲清楚。说明文字可以选择、复制，也可以切换文件继续审阅。
 
-- Codex 使用 app-server 报告的结构化文件事件，不扫描整个工作区。
-- Claude Code 对 `Write`、`Edit` 和 `NotebookEdit` 文件工具建立首次修改基线。
-- 修改列表按会话页签隔离，显示新增、修改、删除和行数变化。
-- 可以逐个文件接受或撤销修改；新文件撤销时会删除，超过 5 MiB 的文件会标记为不可撤销。
-- 从修改列表打开 Diff 时，右侧绑定当前真实源文件；重复打开同一文件会定位到已有 Diff 页签。
-- 本地文件路径链接支持跳转到 JetBrains 编辑器，也可右键在系统文件管理器中定位。
+![在原生 Diff 的代码行间阅读 AI 变更讲解](docs/images/readme/inline-annotations.jpg)
 
-### Codex 专属能力
+### 让 AI 补完，再自己确认
 
-- 通过 `codex app-server --stdio` 使用 Codex 原生 JSON-RPC 协议。
-- 支持模型、推理强度、沙箱、审批策略、命令执行审批和结构化提问。
-- 支持 Codex Skills、MCP、账户用量和 app-server 专属审批能力。
-- Codex app-server 具备显式生命周期管理；断线、重启和项目关闭会清理未完成请求。
+讨论之后可以直接让 AI 补测试。改了哪些文件、差异在哪里、是否保留，都有明确入口。
 
-### Claude Code 渠道
+![AI 新增的边界测试、执行结果和修改审阅入口](docs/images/readme/ai-changes.jpg)
 
-- 通过 `claude -p --output-format stream-json` 使用 Claude Code 的结构化流式输出。
-- Claude 历史读取当前项目的 Claude Code JSONL 文件，与 Codex 历史分开显示。
-- Claude MCP、权限和项目配置仍由 Claude Code CLI 自己管理。
-- Claude Code 当前成熟度低于 Codex 渠道，不建议用于不可恢复的关键修改。
+## 装好后，从一次 Review 开始
 
-## 使用前提
+1. **安装插件 ZIP。** 当前版本为 `2.0`，尚未上架 Marketplace。在 IDE 的 **Settings → Plugins → 齿轮 → Install Plugin from Disk** 中选择 `CodeDeck-2.0.zip`，然后重启 IDE。
+2. **连接 CLI。** 先确保本机 `codex` 或 `claude` 已安装并能正常使用。需要指定可执行文件时，打开 **Settings → Tools → CodeDeck** 填写路径。
+3. **打开变更。** 在 **View → Tool Windows → CodeDeck Changes** 中找到文件，双击打开 Diff，点击上方的 **AI 注释**。
+4. **带着问题继续。** 打开右侧 **CodeDeck**，开启“文件上下文”，在 Diff 里选中代码，再提问。让 AI 修改后，从对话的修改列表继续检查、接受或撤销。
 
-运行插件前需要准备：
+可以从这些问题开始：
 
-- JDK 21
-- JetBrains IDE `2024.3` 或更高版本
-- 支持 JCEF 的 JetBrains Runtime
-- OpenAI Codex CLI，或 Anthropic Claude Code CLI
-- Claude Code `2.1.210` 或更高版本，若需要使用 Claude 渠道
+> 这次修改解决了什么问题？有没有漏掉的边界条件？
+>
+> 这个判断为什么要放在这里？用一个具体输入说明。
+>
+> 给选中的逻辑补上边界测试，先不要改业务规则。
 
-插件本身不包含 Codex / Claude Code CLI、模型服务或账号认证。请先确保在终端执行 `codex` 或 `claude` 可以正常启动。也可以在 **设置 -> 工具 -> CodeDeck** 中填写 `codex`、`codex.cmd`、`claude`、`claude.cmd` 或 CLI 的绝对路径。
+## 需要准备什么
 
-Windows 下，CodeDeck 会优先搜索用户级 `~/.codex` 内的本地 Codex 安装，再退回 `PATH`，避免误启动旧版本 CLI。
+- **JetBrains IDE 2024.3 或更新版本**，使用支持 JCEF 的运行时。
+- **Codex CLI 或 Claude Code CLI**，以及你自己的模型服务配置；插件不附带 CLI、模型额度或账号。
+- 使用 Claude 渠道时，需要 **Claude Code 2.1.210+**。Claude 渠道仍在完善，当前建议优先使用 Codex。
 
-## 快速开始
+AI 注释使用 **Codex / GPT 渠道**的当前供应商和模型，独立运行，不会把注释请求塞进聊天历史。Git / Perforce 连接沿用 IDE 的现有配置。
 
-1. 准备 JDK 21 和支持 JCEF 的 JetBrains IDE。
-2. 安装并登录 Codex CLI 或 Claude Code CLI。
-3. 从源码运行插件，或安装本地构建出的 zip 包。
-4. 打开 IDE 侧边栏中的 CodeDeck 工具窗。
-5. 在输入区选择 GPT 或 Claude 渠道，必要时到设置页添加自定义供应商。
-6. 发起对话，查看 AI 回复、工具执行和文件修改。
+## 供应商和常用设置
 
-## 从源码运行
+在右侧 CodeDeck 的设置页中，可以切换本机配置或添加自己的接口：
 
-在项目根目录执行：
+| 想做什么 | 去哪里 |
+| --- | --- |
+| 添加 GPT / Claude 接口、管理认证凭据 | 供应商 |
+| 选择模型、推理强度、审批与工作区权限 | 聊天输入框下方工具栏 |
+| 设置主题、字号、发送快捷键和通知 | 基础设置 |
+| 保存审阅习惯、项目指令和角色 | 提示词库、Agent 身份 |
+| 管理 Codex 技能和工具连接 | Skills、MCP |
+
+自定义 GPT 接口支持 Responses API / Chat Completions API。认证凭据保存在 **JetBrains PasswordSafe**。修改供应商配置后，请开启新对话。
+
+修改捕获和撤销有文件大小与工具范围限制；详细说明见 [功能、配置与已知边界](docs/usage-details.md)。从独立 ChangeList 插件迁移时，请先禁用旧的 **VCS Changelist Sidebar**。
+
+## 从源码构建
+
+需要 JDK 21。在仓库根目录执行：
 
 ```shell
-# Linux/macOS
-./gradlew runIde
-
-# Windows PowerShell
-./gradlew.bat runIde
+./gradlew check buildPlugin
 ```
 
-运行测试并构建插件包：
+Windows 使用 `gradlew.bat`。产物为 `build/distributions/CodeDeck-2.0.zip`；开发运行使用 `./gradlew runIde`。
 
-```shell
-./gradlew clean check buildPlugin verifyPlugin
-```
+本仓库只维护 JetBrains 插件。测试、兼容性验证和工程说明见 [开发文档](docs/development.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
 
-Windows 也可以使用一键打包脚本：
+## 开源许可
 
-```powershell
-.\tools\package.ps1
-```
-
-脚本会执行清理、测试、插件构建和兼容性验证，成功后输出发行包路径、文件大小和 SHA-256。构建产物位于 `build/distributions/CodeDeck-<version>.zip`。
-
-Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检查、Vitest、Playwright Chromium 回归和 esbuild。首次运行浏览器测试时，Playwright 会下载测试用 Chromium。
-
-## 配置说明
-
-### 本地 CLI 配置
-
-“本地配置”会继续使用 Codex 的 `CODEX_HOME/config.toml`，或 Claude Code 的本机登录与项目配置。CodeDeck 只负责启动 CLI 并展示会话，不替用户保存模型服务账号。
-
-### 自定义 GPT 供应商
-
-自定义 GPT 供应商会通过 Codex `model_providers` 启动覆盖加载，并从 API 基地址下的 `/models` 读取模型。可选择 Responses API 或 Chat Completions API。
-
-### 自定义 Claude 供应商
-
-自定义 Claude 供应商会通过 `ANTHROPIC_BASE_URL` 和 `ANTHROPIC_AUTH_TOKEN` 启动 Claude Code，并使用 Bearer 认证从 `/v1/models` 读取模型。
-
-### 提示词与 Agent 身份
-
-全局提示词、共享提示词和 Agent 身份均由用户主动保存。Codex 通过原生 `developerInstructions` 传给新会话，Claude Code 通过 CLI 的附加系统提示传给新会话。
-
-## 已知边界
-
-- Claude Code 渠道仍缺少充分测试，稳定性和兼容性不如 Codex 渠道。
-- 自定义供应商的工具调用、模型能力和上下文行为取决于供应商自身兼容性。
-- 同一渠道当前只启用一个供应商配置；切换 GPT 供应商会重启 Codex app-server。
-- 修改供应商配置后，旧会话不能继续发送，避免把上下文误发到另一个接口。
-- Codex 的 Skills、MCP、账户用量、结构化审批与回溯能力来自 app-server；Claude 渠道不具备完全相同的能力面。
-- Claude 只对带明确路径的文件工具建立修改基线；纯 Bash/PowerShell 首次写入不会自动进入修改列表。
-- 如果 JetBrains Runtime 不提供 JCEF，工具窗会显示不可用提示，需要更换运行时。
-- 当前没有 Marketplace 安装包和稳定版发布渠道。
-
-## 开发与验证
-
-仓库在每次 push 和 Pull Request 上执行插件验证流程，包括：
-
-- `clean check`
-- `buildPlugin`
-- `verifyPlugin`
-- Java 单元测试
-- TypeScript 类型检查
-- Vitest 测试
-- Playwright Chromium 输入框回归
-- 协议 fixture 与插件兼容性检查
-
-前端使用 TypeScript、esbuild 和锁定依赖构建。页面通过版本化 Bridge v1 envelope 与 Java 侧通信，未知版本、未知类型或缺失身份字段会返回结构化 `protocol.error`。
-
-## 界面参考
-
-界面层级、尺寸和样式令牌记录在 [`docs/cc-gui-visual-spec.md`](docs/cc-gui-visual-spec.md)。该规格结合 CC GUI 的公开界面与 MIT 开源实现整理，CodeDeck 不直接打包 CC GUI 的品牌资源。
-
-## 开源与版权
-
-本项目采用 [MIT License](LICENSE) 开源，原创部分版权归 `MengXingTong` 所有。
-
-部分界面设计与实现基于 MIT 许可的 [CC GUI](https://github.com/zhukunpenglinyutong/jetbrains-cc-gui)，原始版权为 `Copyright (c) 2026 zhukunpenglinyutong（朱昆鹏）`。完整许可与版权声明见 [LICENSE](LICENSE)，同一声明也会随插件发行包提供。本项目与 CC GUI 及其作者不存在隶属或官方合作关系。
+[MIT License](LICENSE)。CodeDeck 原创部分版权归 `MengXingTong` 所有。部分界面设计与实现参考 MIT 许可的 [CC GUI](https://github.com/zhukunpenglinyutong/jetbrains-cc-gui)，版权与许可声明随源码和插件一同保留。
