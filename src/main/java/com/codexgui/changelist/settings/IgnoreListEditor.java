@@ -1,5 +1,7 @@
 package com.codexgui.changelist.settings;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.components.*;
@@ -26,15 +28,15 @@ public final class IgnoreListEditor extends JPanel {
     public IgnoreListEditor(Project project) {
         super(new BorderLayout(0, JBUI.scale(8)));
         this.project = project;
-        add(new JBLabel("<html>忽略列表只控制本侧栏的展示，适用于所有变更文件。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>"), BorderLayout.NORTH);
+        add(new JBLabel(UiMessages.message("<html>忽略列表只控制本侧栏的展示，适用于所有变更文件。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>")), BorderLayout.NORTH);
         var tabs = new JTabbedPane();
-        tabs.addTab("GitHub 默认模板", templatePanel());
+        tabs.addTab(UiMessages.message("GitHub 默认模板"), templatePanel());
         JPanel custom = new JPanel(new BorderLayout(0, JBUI.scale(5)));
-        custom.add(new JBLabel("Gitignore 语法：每行一条，支持 # 注释、*、**、/ 和 ! 例外；自定义规则排在模板之后。"), BorderLayout.NORTH);
+        custom.add(new JBLabel(UiMessages.message("Gitignore 语法：每行一条，支持 # 注释、*、**、/ 和 ! 例外；自定义规则排在模板之后。")), BorderLayout.NORTH);
         custom.add(new JBScrollPane(patterns), BorderLayout.CENTER);
-        tabs.addTab("自定义规则", custom);
-        tabs.addTab("永久忽略路径", pathsPanel(false));
-        tabs.addTab("恢复跟踪", pathsPanel(true));
+        tabs.addTab(UiMessages.message("自定义规则"), custom);
+        tabs.addTab(UiMessages.message("永久忽略路径"), pathsPanel(false));
+        tabs.addTab(UiMessages.message("恢复跟踪"), pathsPanel(true));
         add(tabs, BorderLayout.CENTER);
     }
 
@@ -56,23 +58,23 @@ public final class IgnoreListEditor extends JPanel {
             content.setCaretPosition(0);
         });
         JPanel heading = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        heading.add(new JBLabel("预览模板： ")); heading.add(selected);
+        heading.add(new JBLabel(UiMessages.message("预览模板： "))); heading.add(selected);
         preview.add(heading, BorderLayout.NORTH); preview.add(new JBScrollPane(content), BorderLayout.CENTER);
         panel.add(preview, BorderLayout.CENTER);
-        panel.add(new JBLabel("来源：github.com/github/gitignore · 内置离线快照 · 所有模板默认不启用"), BorderLayout.SOUTH);
+        panel.add(new JBLabel(UiMessages.message("来源：github.com/github/gitignore · 内置离线快照 · 所有模板默认不启用")), BorderLayout.SOUTH);
         return panel;
     }
 
     private JPanel pathsPanel(boolean restore) {
         JPanel panel = new JPanel(new BorderLayout(0, JBUI.scale(6)));
         panel.add(new JBLabel(restore
-                ? "这些路径优先于模板与通配规则。更具体的手动忽略路径仍可覆盖父目录的恢复。"
-                : "右键忽略的路径永久保存在当前项目；选择路径可恢复跟踪，并添加必要的规则例外。"), BorderLayout.NORTH);
+                ? UiMessages.message("这些路径优先于模板与通配规则。更具体的手动忽略路径仍可覆盖父目录的恢复。")
+                : UiMessages.message("右键忽略的路径永久保存在当前项目；选择路径可恢复跟踪，并添加必要的规则例外。")), BorderLayout.NORTH);
         panel.add(new JBScrollPane(restore ? restoredList : ignoredList), BorderLayout.CENTER);
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, JBUI.scale(6), 0));
-        JButton add = new JButton(restore ? "恢复指定文件 / 目录…" : "添加忽略路径…");
+        JButton add = new JButton(restore ? UiMessages.message("恢复指定文件 / 目录…") : UiMessages.message("添加忽略路径…"));
         add.addActionListener(event -> addPath(restore)); buttons.add(add);
-        JButton remove = new JButton(restore ? "移除恢复例外" : "恢复选中路径的跟踪");
+        JButton remove = new JButton(restore ? UiMessages.message("移除恢复例外") : UiMessages.message("恢复选中路径的跟踪"));
         var list = restore ? restoredList : ignoredList;
         remove.setEnabled(false);
         list.addListSelectionListener(event -> remove.setEnabled(!list.isSelectionEmpty()));
@@ -88,8 +90,8 @@ public final class IgnoreListEditor extends JPanel {
 
     private void addPath(boolean restore) {
         String input = Messages.showInputDialog(project,
-                "输入项目相对路径（也可粘贴项目内绝对路径）。目录末尾加 /，例如 Content/Generated/。\n路径按字面匹配，不使用通配符。",
-                restore ? "恢复跟踪" : "永久忽略路径", null);
+                UiMessages.message("输入项目相对路径（也可粘贴项目内绝对路径）。目录末尾加 /，例如 Content/Generated/。\n路径按字面匹配，不使用通配符。"),
+                restore ? UiMessages.message("恢复跟踪") : UiMessages.message("永久忽略路径"), null);
         if (input == null) return;
         try {
             String entry = parsePath(ProjectScope.forBasePath(project.getBasePath()), input);
@@ -98,7 +100,7 @@ public final class IgnoreListEditor extends JPanel {
             removeEquivalent(opposite, entry);
             addEquivalent(model, entry);
             (restore ? restoredList : ignoredList).setSelectedValue(entry, true);
-        } catch (IllegalArgumentException error) { Messages.showErrorDialog(project, error.getMessage(), "路径无效"); }
+        } catch (IllegalArgumentException error) { Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("路径无效")); }
     }
 
     private static void addEquivalent(DefaultListModel<String> model, String value) {
@@ -117,9 +119,9 @@ public final class IgnoreListEditor extends JPanel {
             if (!path.isAbsolute()) path = scope.root().resolve(path);
             return IgnoreRules.literalPath(scope, path, value.endsWith("/"));
         } catch (InvalidPathException error) {
-            throw new IllegalArgumentException("请输入有效的项目内文件或目录路径");
+            throw new IllegalArgumentException(UiMessages.message("请输入有效的项目内文件或目录路径"));
         } catch (IllegalArgumentException error) {
-            throw new IllegalArgumentException("只能添加当前项目内的文件或目录，不能忽略项目根目录或项目外路径");
+            throw new IllegalArgumentException(UiMessages.message("只能添加当前项目内的文件或目录，不能忽略项目根目录或项目外路径"));
         }
     }
 

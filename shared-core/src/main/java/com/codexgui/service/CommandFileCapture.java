@@ -30,22 +30,64 @@ public final class CommandFileCapture {
     private static final Pattern SCRIPT = Pattern.compile("(?i).*\\.(?:mjs|cjs|js|py|ps1|sh|cmd|bat)$");
     private static final Pattern RENAME = Pattern.compile("(?i)\\b(?:Rename-Item|ren|rename)\\s+(?:(?:-LiteralPath|-Path)\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)\\s+(?:-NewName\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)");
 
-    public record Before(Path path, boolean exists, byte[] bytes) { }
-    private record Pending(List<Before> files, Map<Path, Set<Path>> directories, Set<Path> forgotten) { }
+    public record Before(Path path, boolean exists, byte[] bytes, boolean preserveFormat) {
+        public Before(Path path, boolean exists, byte[] bytes) { this(path, exists, bytes, true); }
+    }
+    private record Pending(List<Before> files, Map<Path, Set<Path>> directories, Set<Path> forgotten, boolean preserveFormat) { }
     private final WorkspacePathPolicy paths;
     private final Map<String, Pending> pending = new LinkedHashMap<>();
+    private final Map<Path, Before> turnBaseline = new LinkedHashMap<>();
+    private final Map<byte[], Integer> references = new java.util.IdentityHashMap<>();
     private long retainedBytes;
 
     public CommandFileCapture(Path root) { paths = new WorkspacePathPolicy(root); }
 
+    /** Snapshot bounded Git metadata paths before the model can start a fast external mutation. */
+    public synchronized void prepare() {
+        prepare(List.of(paths.root()));
+    }
+
+    public synchronized void prepare(List<Path> repositories) {
+        if (!turnBaseline.isEmpty()) return;
+        var inputs = new ArrayList<ShellCommandInput>();
+        for (var repository : repositories.stream().limit(8).toList()) {
+            if (!repository.toAbsolutePath().normalize().equals(paths.root()) && paths.normalize(repository) == null) continue;
+            inputs.add(new ShellCommandInput("git revert HEAD", repository.toString()));
+            inputs.add(new ShellCommandInput("git restore .", repository.toString()));
+        }
+        started("turn-baseline", inputs);
+        var snapshot = pending.remove("turn-baseline");
+        if (snapshot != null) snapshot.files().forEach(before -> turnBaseline.put(before.path(), before));
+    }
+
     public synchronized void started(String id, String command, String cwd) {
+        started(id, List.of(new ShellCommandInput(command, cwd)));
+    }
+
+    public synchronized List<Before> snapshot(String id) {
+        var entry = pending.get(id);
+        return entry == null ? List.of() : List.copyOf(entry.files());
+    }
+
+    public synchronized void started(String id, List<ShellCommandInput> inputs) {
         if (id == null || id.isBlank() || pending.containsKey(id) || pending.size() >= MAX_COMMANDS) return;
-        var candidates = new LinkedHashSet<>(candidates(command, cwd));
+        var candidates = new LinkedHashSet<Path>();
+        boolean preserveFormat = inputs.stream().noneMatch(input -> VcsCommandPaths.restores(input.command()));
+        for (var input : inputs.stream().limit(16).toList()) {
+            candidates.addAll(candidates(input.command(), input.cwd()));
+            try {
+                var base = input.cwd() == null || input.cwd().isBlank() ? paths.root() : Path.of(input.cwd());
+                if (!base.isAbsolute()) base = paths.root().resolve(base);
+                candidates.addAll(VcsCommandPaths.resolve(input.command(), base, paths));
+            } catch (RuntimeException ignored) { }
+        }
         var directories = new LinkedHashMap<Path, Set<Path>>();
         var scopeBudget = new int[]{MAX_SCOPE_ENTRIES};
         // Scope computed paths to explicitly mentioned subdirectories or an executed script's directory.
         // Never enumerate the workspace root or follow links; oversized scopes are left to explicit paths.
         for (var path : List.copyOf(candidates)) {
+            // Git's -C directory is not a request to snapshot its entire worktree or database.
+            if (!preserveFormat && Files.isDirectory(path)) continue;
             var directory = Files.isDirectory(path) || !Files.exists(path) && !path.getFileName().toString().contains(".")
                 ? path : SCRIPT.matcher(path.toString()).matches() ? path.getParent() : null;
             if (directory == null || paths.normalize(directory) == null || directories.keySet().stream().anyMatch(directory::startsWith)) continue;
@@ -59,7 +101,13 @@ public final class CommandFileCapture {
             if (before.size() >= MAX_PATHS) break;
             try {
                 // A missing regular file is a possible addition. Directories and links are never snapshotted.
-                if (Files.isSymbolicLink(path) || Files.isDirectory(path)) continue;
+                if (metadata(path) || Files.isSymbolicLink(path) || Files.isDirectory(path)) continue;
+                var early = preserveFormat ? null : turnBaseline.get(path);
+                if (early != null) {
+                    before.add(early);
+                    retain(early.bytes());
+                    continue;
+                }
                 boolean exists = Files.exists(path, LinkOption.NOFOLLOW_LINKS);
                 byte[] bytes = null;
                 if (exists) {
@@ -68,12 +116,12 @@ public final class CommandFileCapture {
                     if (size > MAX_FILE_BYTES || size > MAX_CAPTURE_BYTES - retainedBytes) continue;
                     try (var input = Files.newInputStream(path)) { bytes = input.readNBytes(MAX_FILE_BYTES + 1); }
                     if (bytes.length > MAX_FILE_BYTES || bytes.length > MAX_CAPTURE_BYTES - retainedBytes) continue;
-                    retainedBytes += bytes.length;
+                    retain(bytes);
                 }
-                before.add(new Before(path, exists, bytes));
+                before.add(new Before(path, exists, bytes, preserveFormat));
             } catch (IOException | SecurityException ignored) { }
         }
-        pending.put(id, new Pending(before, directories, new LinkedHashSet<>()));
+        pending.put(id, new Pending(before, directories, new LinkedHashSet<>(), preserveFormat));
     }
 
     public synchronized List<Before> completed(String id) {
@@ -81,7 +129,7 @@ public final class CommandFileCapture {
         if (snapshot == null) return List.of();
         var changed = new LinkedHashMap<Path, Before>();
         for (var entry : snapshot.files()) {
-            if (entry.bytes() != null) retainedBytes -= entry.bytes().length;
+            release(entry.bytes());
             // Revalidate paths: a command could have replaced a parent with a symlink.
             if (paths.normalize(entry.path()) == null || Files.isSymbolicLink(entry.path())) continue;
             try {
@@ -103,7 +151,7 @@ public final class CommandFileCapture {
             for (var path : after) {
                 if (changed.size() >= MAX_PATHS) break;
                 if (!directory.getValue().contains(path) && !snapshot.forgotten().contains(path))
-                    changed.putIfAbsent(path, new Before(path, false, null));
+                    changed.putIfAbsent(path, new Before(path, false, null, snapshot.preserveFormat()));
             }
         }
         return List.copyOf(changed.values());
@@ -115,17 +163,31 @@ public final class CommandFileCapture {
         return List.copyOf(changed);
     }
 
-    public synchronized void clear() { pending.clear(); retainedBytes = 0; }
+    public synchronized void clear() { pending.clear(); turnBaseline.clear(); references.clear(); retainedBytes = 0; }
 
     public synchronized void forget(Path path) {
+        var early = turnBaseline.remove(path);
+        if (early != null) release(early.bytes());
         pending.replaceAll((id, snapshot) -> {
             snapshot.forgotten().add(path);
             return new Pending(snapshot.files().stream().filter(entry -> {
                 if (!entry.path().equals(path)) return true;
-                if (entry.bytes() != null) retainedBytes -= entry.bytes().length;
+                release(entry.bytes());
                 return false;
-            }).toList(), snapshot.directories(), snapshot.forgotten());
+            }).toList(), snapshot.directories(), snapshot.forgotten(), snapshot.preserveFormat());
         });
+    }
+
+    private void retain(byte[] bytes) {
+        if (bytes != null && references.merge(bytes, 1, Integer::sum) == 1) retainedBytes += bytes.length;
+    }
+
+    private void release(byte[] bytes) {
+        if (bytes == null) return;
+        var count = references.get(bytes);
+        if (count == null) return;
+        if (count == 1) { references.remove(bytes); retainedBytes -= bytes.length; }
+        else references.put(bytes, count - 1);
     }
 
     private Set<Path> directoryFiles(Path directory, int[] budget) {
@@ -139,12 +201,12 @@ public final class CommandFileCapture {
                     complete[0] = false; return FileVisitResult.TERMINATE;
                 }
                 @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
-                    if (paths.normalize(dir) == null || Files.isSymbolicLink(dir)) return FileVisitResult.SKIP_SUBTREE;
+                    if (metadata(dir) || paths.normalize(dir) == null || Files.isSymbolicLink(dir)) return FileVisitResult.SKIP_SUBTREE;
                     return count();
                 }
                 @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
                     if (attributes.isDirectory()) complete[0] = false; // depth bound reached
-                    if (attributes.isRegularFile() && paths.normalize(file) != null) found.add(file);
+                    if (!metadata(file) && attributes.isRegularFile() && paths.normalize(file) != null) found.add(file);
                     return count();
                 }
                 @Override public FileVisitResult visitFileFailed(Path file, IOException error) {
@@ -178,6 +240,12 @@ public final class CommandFileCapture {
             } catch (RuntimeException ignored) { }
         }
         return List.copyOf(found);
+    }
+
+    private boolean metadata(Path path) {
+        for (var part : paths.root().relativize(path))
+            if (List.of(".git", ".hg", ".svn").contains(part.toString().toLowerCase(java.util.Locale.ROOT))) return true;
+        return false;
     }
 
     private static String unquote(String value) {

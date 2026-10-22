@@ -1,5 +1,7 @@
 package com.codexgui.changelist.settings;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.util.ui.JBUI;
@@ -17,7 +19,7 @@ public final class IgnoreListDialog extends DialogWrapper {
         editor = new IgnoreListEditor(project);
         editor.reset(project.getService(SidebarSettings.class).snapshot());
         editor.setPreferredSize(JBUI.size(780, 520));
-        setTitle("ChangeList 忽略列表"); setOKButtonText("保存并刷新"); init();
+        setTitle(UiMessages.message("ChangeList 忽略列表")); setOKButtonText(UiMessages.message("保存并刷新")); init();
     }
 
     @Override protected @Nullable JComponent createCenterPanel() { return editor; }

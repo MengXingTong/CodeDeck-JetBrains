@@ -1,3 +1,4 @@
+import {t} from './i18n';
 export interface ConversationMessage {
   kind: string;
   title: string;
@@ -85,7 +86,7 @@ export function reduceBridgeEvent(state: BridgeState, event: ReducedEvent): Brid
       break;
     case 'clear':
       state.messages = [];
-      state.title = string(event.title) || '新会话';
+      state.title = string(event.title) || t('新会话');
       state.threadId = event.threadId || null;
       state.historyReadOnly = false;
       state.usagePercentage = 0;

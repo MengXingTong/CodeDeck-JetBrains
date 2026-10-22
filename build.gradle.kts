@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.codexgui"
-version = "2.1.0"
+version = "2.1.1"
 
 repositories {
     mavenCentral()
@@ -55,21 +55,21 @@ val frontendTypecheck by tasks.registering(NpmTask::class) {
     dependsOn(tasks.npmInstall)
     npmCommand.set(listOf("run"))
     args.set(listOf("typecheck"))
-    inputs.files(fileTree("src/main/ts"), fileTree("src/test"), "tsconfig.json", "playwright.config.ts", "vitest.config.ts")
+    inputs.files(fileTree("src/main/ts"), fileTree("src/test"), fileTree("shared-core/src/main/resources/i18n"), "tsconfig.json", "playwright.config.ts", "vitest.config.ts")
 }
 
 val frontendTest by tasks.registering(NpmTask::class) {
     dependsOn(tasks.npmInstall)
     npmCommand.set(listOf("run"))
     args.set(listOf("test"))
-    inputs.files(fileTree("src/main/ts"), fileTree("src/test/ts"), "vitest.config.ts", "package.json", "package-lock.json")
+    inputs.files(fileTree("src/main/ts"), fileTree("src/test/ts"), fileTree("shared-core/src/main/resources/i18n"), "vitest.config.ts", "package.json", "package-lock.json")
 }
 
 val frontendBundle by tasks.registering(NpmTask::class) {
     dependsOn(tasks.npmInstall)
     npmCommand.set(listOf("run"))
     args.set(listOf("build"))
-    inputs.files(fileTree("src/main/ts"), "package.json", "package-lock.json")
+    inputs.files(fileTree("src/main/ts"), fileTree("shared-core/src/main/resources/i18n"), "package.json", "package-lock.json")
     outputs.file(layout.buildDirectory.file("generated-resources/web/app.js"))
 }
 
@@ -79,6 +79,7 @@ val frontendBrowserTest by tasks.registering(NpmTask::class) {
     args.set(listOf("test:browser:run"))
     inputs.files(
         fileTree("src/main/ts"),
+        fileTree("shared-core/src/main/resources/i18n"),
         fileTree("src/test/browser"),
         "tools/ui-preview.html",
         "tools/serve-preview.mjs",
@@ -95,6 +96,7 @@ intellijPlatform {
         version = project.version.toString()
         description = """
             <p>CodeDeck is a native Codex and Claude Code CLI interface for JetBrains IDEs.</p>
+            <p>Review change lists and native Git/Perforce diffs with AI annotations. English and Simplified Chinese interfaces follow the IDE language.</p>
             <p>面向 JetBrains IDE 的 Codex / Claude Code 图形界面。</p>
             <p>内置 ChangeList 变更树、Git/Perforce 原生 Diff、文件操作与 AI 注释，统一安装和配置。</p>
             <p>连接 Codex app-server 与 Claude Code CLI，不注入第三方隐藏提示词。</p>
@@ -140,6 +142,9 @@ tasks {
 
     test {
         useJUnitPlatform()
+        // Existing transcript fixtures are Chinese; localization tests exercise other locales explicitly.
+        systemProperty("user.language", "zh")
+        systemProperty("user.country", "CN")
         classpath = classpath.filter { it.name != "testFramework.jar" }
         // An explicitly requested real-model acceptance run must never reuse cached test results.
         outputs.upToDateWhen { System.getenv("CODEDECK_REAL_CAPTURE_CODEX").isNullOrBlank() }

@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.diff.requests.ContentDiffRequest;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
@@ -107,19 +109,19 @@ public final class AiSessionStore implements Disposable {
     }
 
     boolean startRequest(Project project, ContentDiffRequest request, AiDiffSnapshot snapshot, AiOptions options) {
-        var task = new AiTaskState("正在生成 AI 注释 · " + snapshot.file());
+        var task = new AiTaskState(UiMessages.message("正在生成 AI 注释 · ") + snapshot.file());
         if (!tryBegin(Path.of(project.getBasePath()).resolve(snapshot.file()), task, options)) return false;
         String key = options.cacheKey(snapshot);
         var session = session(key); session.task = task;
         changed(project, key);
-        new Task.Backgroundable(project, "AI Diff 注释 · " + snapshot.file(), true) {
+        new Task.Backgroundable(project, UiMessages.message("AI Diff 注释 · ") + snapshot.file(), true) {
             private AiResponse response;
             private CodexCli.Result result;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 task.onCancel(indicator::cancel);
                 try {
                     indicator.checkCanceled();
-                    if (snapshot.changes().isEmpty()) throw new IllegalArgumentException("当前文件没有内容差异，无需 AI 注释");
+                    if (snapshot.changes().isEmpty()) throw new IllegalArgumentException(UiMessages.message("当前文件没有内容差异，无需 AI 注释"));
                     result = CodexCli.run(options, Path.of(project.getBasePath()), AiAnnotationPrompt.create(snapshot),
                             () -> stopped(project, task, indicator));
                     response = AiResponse.parse(result.json(), snapshot);
@@ -130,15 +132,15 @@ public final class AiSessionStore implements Disposable {
             @Override public void onSuccess() {
                 if (task.canceled() || disposed || project.isDisposed() || response == null) return;
                 if (!AiNativeSnapshot.matches(snapshot, request)) {
-                    task.finish(AiTaskState.Outcome.STALE, "代码已变化，已丢弃旧版本结果；可点击 AI 注释重新生成"); return;
+                    task.finish(AiTaskState.Outcome.STALE, UiMessages.message("代码已变化，已丢弃旧版本结果；可点击 AI 注释重新生成")); return;
                 }
                 session.annotations = response;
-                task.finish(AiTaskState.Outcome.SUCCEEDED, "完成 · " + result.usageText());
+                task.finish(AiTaskState.Outcome.SUCCEEDED, UiMessages.message("完成 · ") + result.usageText());
             }
             @Override public void onThrowable(@NotNull Throwable error) { task.finish(AiTaskState.Outcome.FAILED, error.getMessage()); }
             @Override public void onCancel() { task.cancel(); }
             @Override public void onFinished() {
-                if (task.running()) task.finish(AiTaskState.Outcome.CANCELED, "已取消；不会自动继续或重试");
+                if (task.running()) task.finish(AiTaskState.Outcome.CANCELED, UiMessages.message("已取消；不会自动继续或重试"));
                 finished(task); changed(project, key);
             }
         }.queue();
@@ -146,10 +148,10 @@ public final class AiSessionStore implements Disposable {
     }
 
     boolean startBatch(Project project, AiBatchState state, AiOptions options) {
-        var task = new AiTaskState("正在准备批量注释…");
+        var task = new AiTaskState(UiMessages.message("正在准备批量注释…"));
         if (!tryBeginBatch(task)) return false;
         batch = state; state.start(task, options); changed(project, "");
-        new Task.Backgroundable(project, "批量生成 AI Diff 注释", true) {
+        new Task.Backgroundable(project, UiMessages.message("批量生成 AI Diff 注释"), true) {
             private int completed;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 task.onCancel(indicator::cancel);
@@ -166,17 +168,17 @@ public final class AiSessionStore implements Disposable {
                     }, ModalityState.any());
                     if (!claimed.get()) {
                         if (stopped(project, task, indicator)) break;
-                        update(row, "已有任务，已跳过", "此文件已在其他 Diff 中生成，未重复请求 AI"); continue;
+                        update(row, UiMessages.message("已有任务，已跳过"), UiMessages.message("此文件已在其他 Diff 中生成，未重复请求 AI")); continue;
                     }
-                    update(row, "处理中", "正在处理 " + (index + 1) + "/" + state.sources().size());
+                    update(row, UiMessages.message("处理中"), UiMessages.message("正在处理 ") + (index + 1) + "/" + state.sources().size());
                     try {
                         var request = NativeDiffOpener.prepare(project, source.target(), indicator, () -> stopped(project, task, indicator));
                         var snapshot = ReadAction.nonBlocking(() -> AiNativeSnapshot.read(Path.of(project.getBasePath()), source.path(), request))
                                 .expireWith(project).wrapProgress(indicator).executeSynchronously();
-                        if (snapshot.changes().isEmpty()) { update(row, "无内容差异", "已跳过无需解释的文件"); continue; }
+                        if (snapshot.changes().isEmpty()) { update(row, UiMessages.message("无内容差异"), UiMessages.message("已跳过无需解释的文件")); continue; }
                         var cached = new AtomicReference<AiResponse>();
                         ApplicationManager.getApplication().invokeAndWait(() -> cached.set(session(options.cacheKey(snapshot)).annotations), ModalityState.any());
-                        if (cached.get() != null) { update(row, "缓存", "复用已有注释，未请求 AI"); continue; }
+                        if (cached.get() != null) { update(row, UiMessages.message("缓存"), UiMessages.message("复用已有注释，未请求 AI")); continue; }
                         if (stopped(project, task, indicator)) break;
                         var result = CodexCli.run(options, Path.of(project.getBasePath()), AiAnnotationPrompt.create(snapshot),
                                 () -> stopped(project, task, indicator));
@@ -186,15 +188,15 @@ public final class AiSessionStore implements Disposable {
                             if (stopped(project, task, indicator)) return;
                             if (request instanceof ContentDiffRequest contents && AiNativeSnapshot.matches(snapshot, contents)) {
                                 annotated(project, options.cacheKey(snapshot), response); completed++;
-                                state.row(row, "完成"); task.progress("已完成 " + completed + " 个文件 · " + result.usageText());
-                            } else { state.row(row, "已过期"); task.progress("代码已变化，已丢弃旧版本结果"); }
+                                state.row(row, UiMessages.message("完成")); task.progress(UiMessages.message("已完成 ") + completed + UiMessages.message(" 个文件 · ") + result.usageText());
+                            } else { state.row(row, UiMessages.message("已过期")); task.progress(UiMessages.message("代码已变化，已丢弃旧版本结果")); }
                             changed(project, "");
                         }, ModalityState.any());
                     } catch (ProcessCanceledException e) { throw e; }
                     catch (CancellationException e) { throw new ProcessCanceledException(e); }
                     catch (Exception e) {
                         ApplicationManager.getApplication().invokeAndWait(() -> {
-                            state.row(row, "失败"); task.finish(AiTaskState.Outcome.FAILED, e.getMessage() + "；队列已停止，未重试");
+                            state.row(row, UiMessages.message("失败")); task.finish(AiTaskState.Outcome.FAILED, e.getMessage() + UiMessages.message("；队列已停止，未重试"));
                         }, ModalityState.any());
                         return;
                     } finally {
@@ -211,12 +213,12 @@ public final class AiSessionStore implements Disposable {
             }
             @Override public void onSuccess() {
                 if (task.running()) task.finish(task.canceled() ? AiTaskState.Outcome.CANCELED : AiTaskState.Outcome.SUCCEEDED,
-                        "队列完成 · 新生成 " + completed + " 个文件；打开 Diff 查看注释");
+                        UiMessages.message("队列完成 · 新生成 ") + completed + UiMessages.message(" 个文件；打开 Diff 查看注释"));
             }
             @Override public void onThrowable(@NotNull Throwable error) { task.finish(AiTaskState.Outcome.FAILED, error.getMessage()); }
             @Override public void onCancel() { task.cancel(); }
             @Override public void onFinished() {
-                if (task.running()) task.finish(AiTaskState.Outcome.CANCELED, "队列已停止");
+                if (task.running()) task.finish(AiTaskState.Outcome.CANCELED, UiMessages.message("队列已停止"));
                 state.finishRows(); finished(task); changed(project, "");
             }
         }.queue();

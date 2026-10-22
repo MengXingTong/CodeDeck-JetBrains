@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.ConversationSession;
 import com.codexgui.model.Attachment;
 import com.codexgui.model.FileReference;
@@ -7,6 +9,7 @@ import com.codexgui.service.ProjectFileSearch;
 import com.codexgui.service.WorkspacePathPolicy;
 import com.google.gson.JsonArray;
 import com.intellij.ide.dnd.DnDEvent;
+import com.intellij.ide.dnd.DnDNativeTarget;
 import com.intellij.ide.dnd.DnDSupport;
 import com.intellij.ide.dnd.FileCopyPasteUtil;
 import com.intellij.openapi.Disposable;
@@ -18,6 +21,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import java.net.URI;
+import java.awt.datatransfer.Transferable;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -87,17 +91,18 @@ final class WorkspaceInputCoordinator implements Disposable {
     }
 
     void installDropTarget(JComponent component, Disposable parent) {
-        // Project View 使用内部 DnD，ChangeList / 系统文件使用标准 Transferable；两条入口都要接收。
+        // 接收 ChangeList 专用引用、Project View 内部 DnD 及系统文件；仅输入框区域允许释放。
         DnDSupport.createBuilder(component)
             .disableAsSource()
             .enableAsNativeTarget()
             .setTargetChecker(event -> {
                 var canDrop = isInsideComposer(event, component) && !nativeDroppedFiles(event).isEmpty();
-                event.setDropPossible(canDrop, canDrop ? "添加文件引用" : "请拖到聊天输入框");
+                event.setDropPossible(canDrop, canDrop ? UiMessages.message("添加文件引用") : UiMessages.message("请拖到聊天输入框"));
                 publishNativeDragState(canDrop);
                 return true;
             })
             .setDropHandler(event -> {
+                if (!isInsideComposer(event, component)) return;
                 // 原生项目树拖放不经过浏览器 drop 事件，先把释放坐标交给输入框定位逻辑。
                 publishNativeDropPosition(event, component);
                 publishNativeDragState(false);
@@ -112,8 +117,8 @@ final class WorkspaceInputCoordinator implements Disposable {
         var session = activeSession.get();
         var chooser = new JFileChooser(root.toFile());
         chooser.setMultiSelectionEnabled(true);
-        chooser.setDialogTitle(image ? "选择图片" : "选择引用文件");
-        if (image) chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("图片", "png", "jpg", "jpeg", "gif", "webp"));
+        chooser.setDialogTitle(image ? UiMessages.message("选择图片") : UiMessages.message("选择引用文件"));
+        if (image) chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(UiMessages.message("图片"), "png", "jpg", "jpeg", "gif", "webp"));
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
         for (var file : chooser.getSelectedFiles()) {
             var path = file.toPath();
@@ -270,6 +275,9 @@ final class WorkspaceInputCoordinator implements Disposable {
 
     private List<Path> nativeDroppedFiles(DnDEvent event) {
         var paths = new LinkedHashSet<Path>();
+        var transferable = event.getAttachedObject() instanceof DnDNativeTarget.EventInfo info
+            ? info.getTransferable() : event.getAttachedObject() instanceof Transferable value ? value : event;
+        paths.addAll(ChatFileTransferable.paths(transferable));
         for (var file : FileCopyPasteUtil.getFileListFromAttachedObject(event.getAttachedObject())) {
             paths.add(file.toPath());
         }

@@ -40,6 +40,8 @@ Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检�
 
 其中 `line-endings` 场景让真实模型故意通过 shell 和补丁置换已有文件的 LF / CRLF、移除 UTF-8 BOM；测试独立检查恢复原格式后仍保留代码修改，以及仅换行变化不产生净差异，并继续核对原始基线与实际撤销结果。
 
+真实 VCS 复验使用 `tools/setup-vcs-capture-fixture.ps1 -P4dPath <本地 p4d.exe> -RunId <新名称>` 准备隔离的 Helix Core 2026.1 服务和 Git 仓库。它只监听随机 localhost 端口，不使用业务 P4 服务；服务根目录、测试仓库、PID、端口和独立 ticket 文件记录在输出的 `fixture.json`。设置 `CODEDECK_CAPTURE_VCS=1`、`CODEDECK_CAPTURE_RUN_ID=<同一名称>`、`CODEDECK_CAPTURE_P4PORT=<fixture.p4port>`、`P4TICKETS=<fixture.tickets>` 与 `CODEDECK_REAL_CAPTURE_CODEX` 后运行同一验收测试，覆盖四文件 P4 revert、Git 单提交 revert、仓库换行、只读文件撤销、内部数据库排除及逐字节恢复。测试后核对 PID 的可执行文件确为 fixture 中的 p4d，再停止该测试进程；保留报告目录。对话撤销只恢复工作文件，不回退 Git 提交与 P4 服务状态。
+
 独立构建脚本同时将浏览器预览绑定到该构建实际打包的前端文件，并自动选择临时空闲端口，避免浏览器回归误读默认构建的旧包、端口冲突或复用其他预览进程；需要固定端口时设置 `CODEDECK_TEST_PREVIEW_PORT`。普通手动预览仍默认使用 4173 端口。
 
 `src/test/browser/prompt-ime.spec.ts` 使用 Chromium 的 `Input.imeSetComposition` 驱动原生组合编辑，覆盖 `wen → we → w → 空`、三次 Backspace、已有文字、后台更新和中文提交后立即发送。提前 `compositionend` 的分支注入宿主通知先于最后一次原生取消的时序，验证页面重绘不会抢先移走输入框。此测试不等同于直接驱动 Windows 微软拼音的候选窗；微软拼音在 Rider / JCEF 中的最终体验仍应通过安装包手动核对。
@@ -48,11 +50,19 @@ Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检�
 
 `ConversationChangeTrackerIdeTest` 验证真实 VFS、打开的编辑器文档与磁盘字节的撤销结果：设置 `CODEDECK_REAL_IDE_ROLLBACK=1`，执行 `./gradlew --no-configuration-cache -I tools/capture-validation.init.gradle -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.service.ConversationChangeTrackerIdeTest`。覆盖单项 / 全部撤销、CRLF、LF、混合换行、UTF-8 BOM 与未保存编辑；可用 `CODEDECK_ROLLBACK_BEFORE` 和 `CODEDECK_ROLLBACK_AFTER` 指定四个 NPC 文件的副本目录复现真实问题。此检查不修改业务项目、不请求模型，普通测试默认跳过。
 
-`WorkspaceDropIntegrationTest` 检查 ChangeList 实际导出的文件经过原生 IDE 拖放管理器后进入聊天输入框：设置 `CODEDECK_REAL_IDE_DND=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.WorkspaceDropIntegrationTest`。覆盖中文与空格路径、已删除文件、图片附件、落点、重复拖入及离开时清理，不请求模型；普通测试默认跳过。
+`WorkspaceDropIntegrationTest` 检查 ChangeList 实际导出的文件和目录经过原生 IDE 拖放管理器后进入聊天输入框：设置 `CODEDECK_REAL_IDE_DND=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.WorkspaceDropIntegrationTest`。覆盖中文与空格路径、目录引用、已删除文件、图片附件、落点、重复拖入及离开时清理，同时验证原生代码编辑器拒绝打开文件或插入路径文字，不请求模型；普通测试默认跳过。
 
 `ConversationConnectionIntegrationTest` 在真实 IDE 事件队列中重放首条消息先启动、“已连接”通知后到达的顺序：设置 `CODEDECK_REAL_CONNECTION_STATE=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ConversationConnectionIntegrationTest`。检查首条回复与会话绑定、重复连接通知、真正断开时的清理及 Claude 隔离，不启动 CLI 或请求模型；普通测试默认跳过。
 
 ## 持续集成与工程结构
+
+### 界面国际化
+
+界面默认跟随 `DynamicBundle.getLocale()` 返回的 IDE 语言：`zh` 系列使用简体中文，其余使用英文。Java 原生界面通过 `UiMessages.message` 读取文案，共享核心通过 `Messages.message` 使用同一语言；JCEF 加载前注入 `window.codedeckLocale`，bootstrap 同步 `uiLocale`。英文资源集中在 `shared-core/src/main/resources/i18n/en.json`，中文源文案作为资源键，前后端共用资源，新增或修改文案时同步维护。无 IDE 应用实例时按 JVM locale 运行，便于独立测试。
+
+前端普通静态文案用 `t('中文文案')`，含 HTML 或插值的模板用 `ui` 标签；仅翻译模板静态片段，插值中的用户消息、代码、路径、供应商名称及已保存提示词不参与翻译。不要对渲染后的 DOM 或整条模型消息做文本替换。代码中的凭据服务名、协议字段、存储标识与历史解析模式须保持稳定；历史命令状态同时识别中英文标记，新会话自动标题同时兼容两种默认名称。Diff 注释提示词按界面语言选择，聊天回复语言仍由用户输入和指令决定。
+
+`MessagesTest`、`i18n.test.ts` 和浏览器国际化回归覆盖语言回退、静态模板边界、历史状态、中文用户内容与英文设置。既有 Java 记录 fixture 固定使用中文测试 locale，新语言用例显式传入 locale。手动预览英文界面可打开 `/tools/ui-preview.html?lang=en`。README 的默认版本为英文，中文版本为 `README.zh-CN.md`；两者应同步更新。
 
 `ProviderModelOptionsIntegrationTest` 在真实 IDE 事件队列中验证聊天模型缓存、页签复用、供应商隔离、接口目录优先级和旧项目提示词迁移：设置 `CODEDECK_REAL_MODEL_OPTIONS=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ProviderModelOptionsIntegrationTest`。不启动 CLI 或请求模型；普通测试默认跳过。
 

@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.TurnHandle;
 import com.codexgui.settings.CodexSettingsState;
 import com.codexgui.settings.ProviderCredentialStore;
@@ -99,7 +101,7 @@ public final class ClaudeCodeService implements Disposable {
         CodexSettingsState.ProviderProfileSnapshot provider,
         Listener listener
     ) {
-        if (disposed) return CompletableFuture.failedFuture(new CancellationException("Claude Code 服务已释放"));
+        if (disposed) return CompletableFuture.failedFuture(new CancellationException(UiMessages.message("Claude Code 服务已释放")));
         cancelledTurns.remove(turnHandle);
         return CompletableFuture.supplyAsync(() -> runTurn(
             turnHandle, executable, conversationId, prompt, model, effort, approvalPolicy, instructions, provider, listener
@@ -176,16 +178,16 @@ public final class ClaudeCodeService implements Disposable {
         ClaudeHookRelayService.HookRegistration hookRegistration = null;
         Path hookSettingsFile = null;
         try {
-            LOG.info("准备启动 Claude Code 回合：turn=" + turnHandle
+            LOG.info(UiMessages.message("准备启动 Claude Code 回合：turn=") + turnHandle
                 + ", executable=" + executable
                 + ", model=" + display(model)
                 + ", provider=" + providerLabel(provider));
-            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException("Claude Code 回合已停止");
+            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException(UiMessages.message("Claude Code 回合已停止"));
             ensureSupportedVersion(executable);
-            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException("Claude Code 回合已停止");
+            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException(UiMessages.message("Claude Code 回合已停止"));
             hookRegistration = hookRelay.register(turnHandle);
             registeredHookTurns.add(turnHandle);
-            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException("Claude Code 回合已停止");
+            if (disposed || cancelledTurns.contains(turnHandle)) throw new CancellationException(UiMessages.message("Claude Code 回合已停止"));
             // Windows 原生命令行会破坏内联 JSON 中的引号，改用临时文件传递 Hook 设置。
             hookSettingsFile = writeHookSettings(hookRegistration.settingsJson());
             var arguments = arguments(
@@ -196,11 +198,11 @@ public final class ClaudeCodeService implements Disposable {
             applyProvider(builder, provider);
             var process = builder.start();
             activeProcesses.put(turnHandle, process);
-            LOG.info("Claude Code 进程已启动：turn=" + turnHandle + ", pid=" + process.pid());
+            LOG.info(UiMessages.message("Claude Code 进程已启动：turn=") + turnHandle + ", pid=" + process.pid());
             // 停止请求可能发生在进程创建和登记之间，登记后再次检查才能避免漏停。
             if (cancelledTurns.contains(turnHandle)) {
                 terminate(process);
-                throw new CancellationException("Claude Code 回合已停止");
+                throw new CancellationException(UiMessages.message("Claude Code 回合已停止"));
             }
             writePrompt(process, prompt);
 
@@ -222,7 +224,7 @@ public final class ClaudeCodeService implements Disposable {
             try {
                 result = readOutput(process, sessionId, listener, type -> {
                     if (!firstResponseState.compareAndSet(FirstResponseState.WAITING, FirstResponseState.RECEIVED)) return;
-                    LOG.info("Claude Code 收到首个响应事件：turn=" + turnHandle
+                    LOG.info(UiMessages.message("Claude Code 收到首个响应事件：turn=") + turnHandle
                         + ", pid=" + process.pid()
                         + ", type=" + type
                         + ", elapsedMs=" + elapsedMillis(startedAt));
@@ -237,26 +239,26 @@ public final class ClaudeCodeService implements Disposable {
             }
             var exitCode = process.waitFor();
             errorReader.join();
-            LOG.info("Claude Code 进程已结束：turn=" + turnHandle
+            LOG.info(UiMessages.message("Claude Code 进程已结束：turn=") + turnHandle
                 + ", pid=" + process.pid()
                 + ", exitCode=" + exitCode
                 + ", elapsedMs=" + elapsedMillis(startedAt)
                 + ", stderrLines=" + errorLineCount.get());
-            if (cancelledTurns.contains(turnHandle)) throw new CancellationException("Claude Code 回合已停止");
+            if (cancelledTurns.contains(turnHandle)) throw new CancellationException(UiMessages.message("Claude Code 回合已停止"));
             if (firstResponseState.get() == FirstResponseState.TIMED_OUT) {
                 throw new IllegalStateException(firstResponseTimeoutMessage(process.pid(), errorOutput));
             }
             if (exitCode != 0) {
                 var detail = diagnosticSummary(errorOutput);
-                if (detail.isBlank()) detail = "Claude Code 退出码：" + exitCode;
+                if (detail.isBlank()) detail = UiMessages.message("Claude Code 退出码：") + exitCode;
                 throw new IllegalStateException(detail);
             }
             return result;
         } catch (Exception error) {
             if (error instanceof CancellationException) {
-                LOG.info("Claude Code 回合已取消：turn=" + turnHandle + ", elapsedMs=" + elapsedMillis(startedAt));
+                LOG.info(UiMessages.message("Claude Code 回合已取消：turn=") + turnHandle + ", elapsedMs=" + elapsedMillis(startedAt));
             } else {
-                LOG.warn("Claude Code 回合失败：turn=" + turnHandle
+                LOG.warn(UiMessages.message("Claude Code 回合失败：turn=") + turnHandle
                     + ", elapsedMs=" + elapsedMillis(startedAt)
                     + ", error=" + sanitizeDiagnostic(error.getMessage()), error);
             }
@@ -287,12 +289,12 @@ public final class ClaudeCodeService implements Disposable {
 
     static HistoryConversation readHistoryConversation(Path directory, String sessionId) throws IOException {
         if (directory == null || sessionId == null || !sessionId.matches("[0-9a-fA-F-]{36}")) {
-            throw new IOException("无效的 Claude 会话 ID");
+            throw new IOException(UiMessages.message("无效的 Claude 会话 ID"));
         }
         var normalizedDirectory = directory.toAbsolutePath().normalize();
         var path = normalizedDirectory.resolve(sessionId + ".jsonl").normalize();
         if (!path.startsWith(normalizedDirectory) || !Files.isRegularFile(path)) {
-            throw new IOException("找不到 Claude 历史会话");
+            throw new IOException(UiMessages.message("找不到 Claude 历史会话"));
         }
 
         var entries = new ArrayList<HistoryEntry>();
@@ -319,7 +321,7 @@ public final class ClaudeCodeService implements Disposable {
                 }
             }
         }
-        if (title.isBlank()) title = "未命名会话";
+        if (title.isBlank()) title = UiMessages.message("未命名会话");
         return new HistoryConversation(sessionId, title, List.copyOf(entries));
     }
 
@@ -492,7 +494,7 @@ public final class ClaudeCodeService implements Disposable {
         try {
             Files.deleteIfExists(path);
         } catch (IOException error) {
-            LOG.warn("无法清理 Claude Hook 临时设置文件：" + path, error);
+            LOG.warn(UiMessages.message("无法清理 Claude Hook 临时设置文件：") + path, error);
         }
     }
 
@@ -500,9 +502,9 @@ public final class ClaudeCodeService implements Disposable {
         if (verifiedExecutables.contains(executable)) return;
         var version = readVersion(executable);
         if (!supportsVersion(version)) {
-            var displayVersion = version.lines().findFirst().orElse("无法识别").trim();
+            var displayVersion = version.lines().findFirst().orElse(UiMessages.message("无法识别")).trim();
             throw new IllegalStateException(
-                "需要 Claude Code " + MINIMUM_VERSION + " 或更高版本，当前版本：" + displayVersion);
+                UiMessages.message("需要 Claude Code ") + MINIMUM_VERSION + UiMessages.message(" 或更高版本，当前版本：") + displayVersion);
         }
         verifiedExecutables.add(executable);
     }
@@ -511,11 +513,11 @@ public final class ClaudeCodeService implements Disposable {
         var process = new ProcessBuilder(command(executable, "--version")).redirectErrorStream(true).start();
         if (!process.waitFor(4, TimeUnit.SECONDS)) {
             process.destroyForcibly();
-            throw new IllegalStateException("读取 Claude Code 版本超时");
+            throw new IllegalStateException(UiMessages.message("读取 Claude Code 版本超时"));
         }
         var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
         if (process.exitValue() != 0) throw new IllegalStateException(
-            output.isBlank() ? "无法读取 Claude Code 版本" : output);
+            output.isBlank() ? UiMessages.message("无法读取 Claude Code 版本") : output);
         return output;
     }
 
@@ -537,7 +539,7 @@ public final class ClaudeCodeService implements Disposable {
 
     static RuntimeException executionFailure(String executable, Exception error) {
         if (error instanceof CancellationException cancellation) return cancellation;
-        return new IllegalStateException("无法运行 Claude Code（" + executable + "）：" + error.getMessage(), error);
+        return new IllegalStateException(UiMessages.message("无法运行 Claude Code（") + executable + "）：" + error.getMessage(), error);
     }
 
     private void terminate(Process process) {
@@ -566,7 +568,7 @@ public final class ClaudeCodeService implements Disposable {
                 try {
                     event = GSON.fromJson(line, JsonObject.class);
                 } catch (RuntimeException error) {
-                    LOG.debug("忽略无法解析的 Claude Code 输出：" + sanitizeDiagnostic(line), error);
+                    LOG.debug(UiMessages.message("忽略无法解析的 Claude Code 输出：") + sanitizeDiagnostic(line), error);
                     continue;
                 }
                 var type = string(event, "type");
@@ -610,7 +612,7 @@ public final class ClaudeCodeService implements Disposable {
                     var resultText = string(event, "result");
                     if (!resultText.isBlank()) finalText = resultText;
                     if (event.has("is_error") && event.get("is_error").getAsBoolean()) {
-                        throw new IllegalStateException(finalText.isBlank() ? "Claude Code 返回错误" : finalText);
+                        throw new IllegalStateException(finalText.isBlank() ? UiMessages.message("Claude Code 返回错误") : finalText);
                     }
                 }
             }
@@ -647,7 +649,7 @@ public final class ClaudeCodeService implements Disposable {
                 LOG.warn("Claude Code stderr：turn=" + turnHandle + ", " + diagnostic);
             }
         } catch (IOException error) {
-            if (process.isAlive()) LOG.warn("读取 Claude Code stderr 失败：turn=" + turnHandle, error);
+            if (process.isAlive()) LOG.warn(UiMessages.message("读取 Claude Code stderr 失败：turn=") + turnHandle, error);
         }
     }
 
@@ -660,11 +662,11 @@ public final class ClaudeCodeService implements Disposable {
     }
 
     static String firstResponseTimeoutMessage(long pid, StringBuilder errorOutput) {
-        var message = "Claude Code 在 " + FIRST_RESPONSE_TIMEOUT_SECONDS
-            + " 秒内未返回任何响应事件，已终止进程（PID " + pid
-            + "）。请检查供应商接口、模型名称和网络代理。";
+        var message = UiMessages.message("Claude Code 在 ") + FIRST_RESPONSE_TIMEOUT_SECONDS
+            + UiMessages.message(" 秒内未返回任何响应事件，已终止进程（PID ") + pid
+            + UiMessages.message("）。请检查供应商接口、模型名称和网络代理。");
         var detail = diagnosticSummary(errorOutput);
-        return detail.isBlank() ? message : message + " 最近错误：" + detail;
+        return detail.isBlank() ? message : message + UiMessages.message(" 最近错误：") + detail;
     }
 
     private static String diagnosticSummary(StringBuilder output) {
@@ -693,7 +695,7 @@ public final class ClaudeCodeService implements Disposable {
     private void applyProvider(ProcessBuilder builder, CodexSettingsState.ProviderProfileSnapshot provider) {
         if (provider == null || provider.builtIn()) return;
         var apiKey = ProviderCredentialStore.get(provider.id());
-        if (apiKey == null || apiKey.isBlank()) throw new IllegalStateException("当前 Claude 供应商尚未配置认证令牌");
+        if (apiKey == null || apiKey.isBlank()) throw new IllegalStateException(UiMessages.message("当前 Claude 供应商尚未配置认证令牌"));
         builder.environment().put("ANTHROPIC_BASE_URL", provider.baseUrl());
         // 中转渠道统一使用 Bearer 令牌，并清除本机 API Key 避免覆盖当前认证。
         builder.environment().put("ANTHROPIC_AUTH_TOKEN", apiKey);

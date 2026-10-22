@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -20,8 +22,8 @@ final class AiTaskState {
     String displayStatus() {
         if (!running()) return message;
         long seconds = (System.nanoTime() - started) / 1_000_000_000;
-        return message + " · 已用时 " + seconds / 60 + "分" + seconds % 60 + "秒"
-                + (canceled() ? "" : " · 关闭窗口后继续运行");
+        return message + UiMessages.message(" · 已用时 ") + seconds / 60 + UiMessages.message("分") + seconds % 60 + UiMessages.message("秒")
+                + (canceled() ? "" : UiMessages.message(" · 关闭窗口后继续运行"));
     }
     void progress(String message) { if (running() && !canceled()) this.message = message; }
     void onCancel(Runnable action) {
@@ -30,7 +32,7 @@ final class AiTaskState {
     }
     void cancel() {
         if (running() && canceled.compareAndSet(false, true)) {
-            message = "正在停止 AI 任务…";
+            message = UiMessages.message("正在停止 AI 任务…");
             runCancelAction();
         }
     }
@@ -40,9 +42,9 @@ final class AiTaskState {
     }
     void finish(Outcome result, String message) {
         if (!running()) return;
-        if (result == Outcome.RUNNING) throw new IllegalArgumentException("任务必须以最终状态结束");
+        if (result == Outcome.RUNNING) throw new IllegalArgumentException(UiMessages.message("任务必须以最终状态结束"));
         outcome = canceled() ? Outcome.CANCELED : result;
-        this.message = outcome == Outcome.CANCELED ? "已取消；不会自动继续或重试" : message;
+        this.message = outcome == Outcome.CANCELED ? UiMessages.message("已取消；不会自动继续或重试") : message;
         cancelAction.set(null);
     }
 }

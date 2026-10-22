@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.diff.EditorDiffViewer;
 import com.intellij.diff.contents.DocumentContent;
 import com.intellij.diff.requests.ContentDiffRequest;
@@ -38,8 +40,8 @@ public final class AiDiffPanel extends JPanel implements Disposable {
     private final EditorDiffViewer viewer;
     private final AiSessionStore store;
     private final AiOptionsPanel options;
-    private final JButton generate = new JButton("AI 注释"), regenerate = new JButton("重新生成"), stop = new JButton("停止注释");
-    private final JLabel status = new JLabel("点击 AI 注释生成当前文件的变更说明");
+    private final JButton generate = new JButton(UiMessages.message("AI 注释")), regenerate = new JButton(UiMessages.message("重新生成")), stop = new JButton(UiMessages.message("停止注释"));
+    private final JLabel status = new JLabel(UiMessages.message("点击 AI 注释生成当前文件的变更说明"));
     private final List<Inlay<?>> inlays = new ArrayList<>();
     private final Timer timer = new Timer(1000, e -> updateStatus());
     private AiDiffSnapshot snapshot;
@@ -60,13 +62,13 @@ public final class AiDiffPanel extends JPanel implements Disposable {
         var actions = new JPanel(new BorderLayout()); actions.add(buttons, BorderLayout.WEST);
         actions.add(status, BorderLayout.CENTER); add(actions, BorderLayout.SOUTH);
         generate.addActionListener(e -> generate(false)); regenerate.addActionListener(e -> generate(true));
-        regenerate.setToolTipText("忽略缓存，手动消耗额度重新生成当前文件注释");
+        regenerate.setToolTipText(UiMessages.message("忽略缓存，手动消耗额度重新生成当前文件注释"));
         stop.addActionListener(e -> {
             var current = store.activeFile(path);
             if (current != null) store.cancel(project, current.task());
             updateStatus();
         });
-        stop.setToolTipText("只停止此文件的注释任务；此文件由批量队列处理时停止所属队列");
+        stop.setToolTipText(UiMessages.message("只停止此文件的注释任务；此文件由批量队列处理时停止所属队列"));
         stop.setVisible(false);
         status.setBorder(JBUI.Borders.emptyLeft(6));
     }
@@ -121,7 +123,7 @@ public final class AiDiffPanel extends JPanel implements Disposable {
         if (store.activeFile(path) != null) { updateStatus(); return; }
         loadContext(); if (stale || snapshot == null) return;
         if (!force && store.session(activeOptions.cacheKey(snapshot)).annotations != null) {
-            status.setText("已显示缓存注释，未消耗额度；需要更新时点击重新生成"); return;
+            status.setText(UiMessages.message("已显示缓存注释，未消耗额度；需要更新时点击重新生成")); return;
         }
         store.startRequest(project, request, snapshot, activeOptions); updateStatus();
     }
@@ -135,16 +137,16 @@ public final class AiDiffPanel extends JPanel implements Disposable {
         stop.setVisible(active != null); stop.setEnabled(active != null && active.running() && !active.canceled());
         if (active != null) {
             status.setText(active.displayStatus());
-            status.setToolTipText(active.canceled() ? "正在终止当前请求；不会继续队列或自动重试"
-                    : "点击停止注释可终止此文件的任务；切换文件可并行生成，关闭窗口后继续在后台运行");
+            status.setToolTipText(active.canceled() ? UiMessages.message("正在终止当前请求；不会继续队列或自动重试")
+                    : UiMessages.message("点击停止注释可终止此文件的任务；切换文件可并行生成，关闭窗口后继续在后台运行"));
         } else if (stale) {
-            status.setText(contextError == null ? "代码已变化，旧注释已过期；点击 AI 注释可为当前内容生成" : contextError);
+            status.setText(contextError == null ? UiMessages.message("代码已变化，旧注释已过期；点击 AI 注释可为当前内容生成") : contextError);
             status.setToolTipText(null);
         } else if (snapshot != null) {
             var session = store.session(activeOptions.cacheKey(snapshot));
             var displayed = store.displayedSession(snapshot, activeOptions);
             if (session.task != null) status.setText(session.task.displayStatus());
-            else status.setText(displayed.annotations == null ? "点击 AI 注释生成当前文件的变更说明" : "已显示缓存注释，未请求 AI");
+            else status.setText(displayed.annotations == null ? UiMessages.message("点击 AI 注释生成当前文件的变更说明") : UiMessages.message("已显示缓存注释，未请求 AI"));
             status.setToolTipText(displayed.annotations == null ? null : displayed.annotations.summary());
         }
     }

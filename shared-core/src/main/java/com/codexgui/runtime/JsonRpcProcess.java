@@ -1,5 +1,7 @@
 package com.codexgui.runtime;
 
+import com.codexgui.i18n.Messages;
+
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -46,7 +48,7 @@ public final class JsonRpcProcess implements AutoCloseable {
                 while ((line = reader.readLine()) != null) log.accept(line);
             } catch (IOException ignored) { }
         });
-        process.onExit().thenRun(() -> fail("CLI app-server 已退出"));
+        process.onExit().thenRun(() -> fail(Messages.message("CLI app-server 已退出")));
     }
 
     public CompletableFuture<JsonObject> request(String method, JsonObject params) {
@@ -54,12 +56,12 @@ public final class JsonRpcProcess implements AutoCloseable {
     }
 
     public CompletableFuture<JsonObject> request(String method, JsonObject params, Duration timeout) {
-        if (closed) return CompletableFuture.failedFuture(new IOException("CLI 连接已关闭"));
+        if (closed) return CompletableFuture.failedFuture(new IOException(Messages.message("CLI 连接已关闭")));
         var id = sequence.incrementAndGet();
         var future = new CompletableFuture<JsonObject>();
         pending.put(id, future);
         var timer = timeouts.schedule(() -> {
-            if (pending.remove(id, future)) future.completeExceptionally(new IOException("CLI 请求超时：" + method));
+            if (pending.remove(id, future)) future.completeExceptionally(new IOException(Messages.message("CLI 请求超时：") + method));
         }, timeout.toMillis(), TimeUnit.MILLISECONDS);
         future.whenComplete((result, error) -> { pending.remove(id, future); timer.cancel(false); });
         var message = new JsonObject();
@@ -87,7 +89,7 @@ public final class JsonRpcProcess implements AutoCloseable {
     public boolean isAlive() { return !closed && process.isAlive(); }
 
     private synchronized void write(JsonObject message) throws IOException {
-        if (closed) throw new IOException("CLI 连接已关闭");
+        if (closed) throw new IOException(Messages.message("CLI 连接已关闭"));
         output.write(message.toString());
         output.newLine();
         output.flush();
@@ -113,8 +115,8 @@ public final class JsonRpcProcess implements AutoCloseable {
                         ? message.getAsJsonObject("result") : new JsonObject());
                 }
             }
-            fail("CLI 连接已断开");
-        } catch (Exception error) { fail("CLI 协议错误：" + error.getMessage()); }
+            fail(Messages.message("CLI 连接已断开"));
+        } catch (Exception error) { fail(Messages.message("CLI 协议错误：") + error.getMessage()); }
     }
 
     private synchronized void fail(String detail) {
@@ -131,6 +133,6 @@ public final class JsonRpcProcess implements AutoCloseable {
     @Override public void close() {
         // Reap descendants as well as Windows npm/cmd launchers.
         process.descendants().forEach(child -> child.destroyForcibly());
-        fail("CLI 连接已关闭");
+        fail(Messages.message("CLI 连接已关闭"));
     }
 }

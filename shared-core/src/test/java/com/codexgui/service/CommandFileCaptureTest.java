@@ -14,6 +14,46 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandFileCaptureTest {
     @TempDir Path root;
 
+    @Test void gitRevertResolvesCommitFilesWithoutScanningTheWorktreeOrCapturingGitInternals() throws Exception {
+        git("init", "--quiet"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.invalid");
+        git("config", "core.autocrlf", "false");
+        Files.writeString(root.resolve("modified.cpp"), "base\n");
+        Files.writeString(root.resolve("deleted.cpp"), "deleted base\n");
+        git("add", "."); git("commit", "--quiet", "-m", "base");
+        Files.writeString(root.resolve("modified.cpp"), "before\r\n");
+        Files.delete(root.resolve("deleted.cpp")); Files.writeString(root.resolve("added.cpp"), "added\n");
+        git("add", "."); git("commit", "--quiet", "-m", "change");
+        for (int i = 0; i < 520; i++) Files.writeString(root.resolve("unrelated-" + i + ".txt"), "user content");
+        var capture = new CommandFileCapture(root);
+        capture.prepare();
+        // A native command may finish before its streamed started event reaches the plugin.
+        git("revert", "--no-edit", "HEAD");
+        capture.started("git", "git revert --no-edit HEAD", root.toString());
+        var changes = capture.completed("git");
+        assertEquals(Set.of("modified.cpp", "deleted.cpp", "added.cpp"), changes.stream()
+            .map(before -> before.path().getFileName().toString()).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(changes.stream().noneMatch(CommandFileCapture.Before::preserveFormat));
+        assertFalse(changes.stream().filter(before -> before.path().endsWith("deleted.cpp")).findFirst().orElseThrow().exists());
+    }
+
+    @Test void explicitDirectoryScopesExcludeVcsDatabases() throws Exception {
+        var scope = Files.createDirectories(root.resolve("repo"));
+        var index = Files.createDirectories(scope.resolve(".git")).resolve("index");
+        Files.writeString(index, "old index"); Files.writeString(scope.resolve("file.cpp"), "old");
+        var capture = new CommandFileCapture(root);
+        capture.started("scope", "generator repo", null);
+        Files.writeString(index, "new index"); Files.writeString(scope.resolve("file.cpp"), "new");
+        assertEquals(List.of(scope.resolve("file.cpp")), capture.completed("scope").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    private void git(String... args) throws Exception {
+        var command = new java.util.ArrayList<>(List.of("git", "-c", "core.fsmonitor=false", "-C", root.toString()));
+        command.addAll(List.of(args));
+        var process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, process.waitFor(), output);
+    }
+
     @Test void capturesPowerShellArrayWritesWithoutScanningTheWorkspace() throws Exception {
         var names = List.of("NpcGroupBase.h", "NpcGroupBase.cpp", "NpcCreateComponent.h", "NpcCreateComponent.cpp");
         var source = Files.createDirectories(root.resolve("Source/NPC"));

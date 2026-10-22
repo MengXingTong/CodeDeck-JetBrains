@@ -1,3 +1,4 @@
+import {t, ui} from './i18n';
 import {baseKeymap} from 'prosemirror-commands';
 import {dropCursor} from 'prosemirror-dropcursor';
 import {history, redo, undo} from 'prosemirror-history';
@@ -124,7 +125,7 @@ const promptSchema = new Schema({
       draggable: true,
       attrs: {
         id: {},
-        name: {default: '文件'},
+        name: {default: t('文件')},
         path: {default: ''},
         directory: {default: false},
       },
@@ -134,7 +135,7 @@ const promptSchema = new Schema({
           const node = element as HTMLElement;
           return {
             id: node.dataset.fileReference || '',
-            name: node.dataset.fileReferenceName || node.textContent || '文件',
+            name: node.dataset.fileReferenceName || node.textContent || t('文件'),
             path: node.getAttribute('title') || '',
             directory: node.classList.contains('directory'),
           };
@@ -188,7 +189,7 @@ function appendTextSegment(segments: PromptSegment[], text: string): void {
 function referenceFromNode(node: ProseMirrorNode): PromptFileReference {
   return {
     id: String(node.attrs.id || ''),
-    name: String(node.attrs.name || '文件'),
+    name: String(node.attrs.name || t('文件')),
     path: String(node.attrs.path || ''),
     directory: Boolean(node.attrs.directory),
   };
@@ -244,7 +245,7 @@ export class PromptEditor {
         id: 'prompt',
         class: 'input',
         role: 'textbox',
-        'aria-label': '消息',
+        'aria-label': t('消息'),
         'aria-multiline': 'true',
         'data-placeholder': options.placeholder,
         spellcheck: 'true',
@@ -309,6 +310,15 @@ export class PromptEditor {
 
   focus(): void {
     this.view.focus();
+  }
+
+  updateLabels(placeholder: string): void {
+    this.options.placeholder = placeholder;
+    this.view.setProps({attributes: {
+      id: 'prompt', class: 'input', role: 'textbox',
+      'aria-label': t('消息'), 'aria-multiline': 'true',
+      'data-placeholder': placeholder, spellcheck: 'true',
+    }});
   }
 
   snapshot(): PromptSnapshot {
@@ -739,8 +749,8 @@ export class PromptEditor {
     remove.className = 'file-reference-remove';
     remove.type = 'button';
     remove.tabIndex = -1;
-    remove.title = '移除文件引用';
-    remove.setAttribute('aria-label', `移除 ${reference.name}`);
+    remove.title = t('移除文件引用');
+    remove.setAttribute('aria-label', ui`移除 ${reference.name}`);
     remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>';
     remove.addEventListener('mousedown', event => event.preventDefault());
     remove.addEventListener('click', event => {
@@ -769,7 +779,7 @@ export class PromptEditor {
       else {
         const reference = this.references.get(segment.referenceId) || {
           id: segment.referenceId,
-          name: segment.referencePath?.split(/[\\/]/).pop() || '文件',
+          name: segment.referencePath?.split(/[\\/]/).pop() || t('文件'),
           path: segment.referencePath || '',
           directory: false,
         };

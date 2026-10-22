@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.ConversationSession;
 import com.codexgui.conversation.SessionRegistry;
 import com.codexgui.service.AttentionService;
@@ -137,7 +139,7 @@ final class ProviderSettingsCoordinator implements Disposable {
             ApplicationManager.getApplication().invokeLater(
                 () -> applyModelOptions(profileId, profileRevision, modelIds, resolvedDefault));
         }).exceptionally(error -> {
-            ApplicationManager.getApplication().invokeLater(() -> listener.asyncError("无法读取 Codex 模型列表", error));
+            ApplicationManager.getApplication().invokeLater(() -> listener.asyncError(UiMessages.message("无法读取 Codex 模型列表"), error));
             return null;
         });
     }
@@ -147,13 +149,13 @@ final class ProviderSettingsCoordinator implements Disposable {
         var selected = providerChannel(requestedProvider);
         var changesChannel = !Objects.equals(selected, session.provider());
         if (changesChannel && session.busy()) {
-            listener.toast("任务运行期间不能切换供应商");
+            listener.toast(UiMessages.message("任务运行期间不能切换供应商"));
             return;
         }
         // 跨渠道切换时复用当前页签，并让目标渠道从空白会话开始。
         if (changesChannel) {
             listener.startNewConversation(requestedTitle, selected);
-            listener.toast(Objects.equals(selected, "claude") ? "已切换到 Claude 渠道" : "已切换到 GPT 渠道");
+            listener.toast(Objects.equals(selected, "claude") ? UiMessages.message("已切换到 Claude 渠道") : UiMessages.message("已切换到 GPT 渠道"));
             return;
         }
 
@@ -196,11 +198,11 @@ final class ProviderSettingsCoordinator implements Disposable {
         var profile = settingsService.provider(id);
         if (profile == null) return;
         if (hasBusySession(profile.channel)) {
-            listener.toast("任务运行期间不能切换供应商配置");
+            listener.toast(UiMessages.message("任务运行期间不能切换供应商配置"));
             return;
         }
         if (!profile.builtIn && (!validProviderUrl(profile.baseUrl) || !ProviderCredentialStore.has(profile.id))) {
-            listener.toast("请先补全接口地址和认证凭据");
+            listener.toast(UiMessages.message("请先补全接口地址和认证凭据"));
             return;
         }
         if (Objects.equals(settingsService.activeProviderId(profile.channel), profile.id)) return;
@@ -222,11 +224,11 @@ final class ProviderSettingsCoordinator implements Disposable {
         if (apiKey == null || apiKey.isBlank()) {
             activatingProviderByChannel.remove(profileChannel, profileId);
             publishProviderStatus();
-            listener.toast("请先补全接口地址和认证凭据");
+            listener.toast(UiMessages.message("请先补全接口地址和认证凭据"));
             return;
         }
         publishProviderStatus();
-        listener.toast("正在读取供应商模型目录...");
+        listener.toast(UiMessages.message("正在读取供应商模型目录..."));
         providerModelService.listModels(profile.snapshot(), apiKey).thenAccept(modelIds ->
             ApplicationManager.getApplication().invokeLater(
                 () -> completeCustomProviderActivation(profileChannel, profileId, profileRevision, modelIds)
@@ -245,7 +247,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var requestedId = string(request, "id", "");
         var existing = requestedId.isBlank() ? null : settingsService.provider(requestedId);
         if (existing != null && existing.builtIn) {
-            listener.providerSaveResult(false, "内置供应商不能编辑");
+            listener.providerSaveResult(false, UiMessages.message("内置供应商不能编辑"));
             return;
         }
         var channel = providerChannel(string(request, "channel", CodexSettingsState.CODEX_CHANNEL));
@@ -253,26 +255,26 @@ final class ProviderSettingsCoordinator implements Disposable {
         var baseUrl = string(request, "baseUrl", "").trim();
         var apiKey = string(request, "apiKey", "").trim();
         if (name.isBlank() || baseUrl.isBlank()) {
-            listener.providerSaveResult(false, "供应商名称和接口地址不能为空");
+            listener.providerSaveResult(false, UiMessages.message("供应商名称和接口地址不能为空"));
             return;
         }
         if (!validProviderUrl(baseUrl)) {
-            listener.providerSaveResult(false, "接口地址必须是有效的 http 或 https 地址");
+            listener.providerSaveResult(false, UiMessages.message("接口地址必须是有效的 http 或 https 地址"));
             return;
         }
         if (existing == null && apiKey.isBlank()) {
-            listener.providerSaveResult(false, "新增供应商时必须填写认证凭据");
+            listener.providerSaveResult(false, UiMessages.message("新增供应商时必须填写认证凭据"));
             return;
         }
         var duplicate = settings.providers.stream().anyMatch(item -> !Objects.equals(item.id, requestedId)
             && Objects.equals(item.channel, channel) && item.name.equalsIgnoreCase(name));
         if (duplicate) {
-            listener.providerSaveResult(false, "同一渠道下不能使用重复的供应商名称");
+            listener.providerSaveResult(false, UiMessages.message("同一渠道下不能使用重复的供应商名称"));
             return;
         }
         var activeEdit = existing != null && Objects.equals(settingsService.activeProviderId(existing.channel), existing.id);
         if (activeEdit && hasBusySession(existing.channel)) {
-            listener.providerSaveResult(false, "任务运行期间不能修改正在使用的供应商");
+            listener.providerSaveResult(false, UiMessages.message("任务运行期间不能修改正在使用的供应商"));
             return;
         }
 
@@ -283,8 +285,8 @@ final class ProviderSettingsCoordinator implements Disposable {
             if (!apiKey.isBlank()) ProviderCredentialStore.set(profile.id, apiKey);
             else if (bool(request, "clearApiKey", false)) ProviderCredentialStore.remove(profile.id);
         } catch (RuntimeException error) {
-            LOG.warn("保存供应商认证凭据失败", error);
-            listener.providerSaveResult(false, "无法安全保存认证凭据");
+            LOG.warn(UiMessages.message("保存供应商认证凭据失败"), error);
+            listener.providerSaveResult(false, UiMessages.message("无法安全保存认证凭据"));
             return;
         }
 
@@ -300,7 +302,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         if (activeEdit) applyProviderRuntimeChange(profile.channel);
         listener.settingsChanged();
         publishProviderStatus();
-        listener.providerSaveResult(true, existing == null ? "供应商已添加" : "供应商配置已保存");
+        listener.providerSaveResult(true, existing == null ? UiMessages.message("供应商已添加") : UiMessages.message("供应商配置已保存"));
     }
 
     void deleteProviderProfile(String id) {
@@ -310,7 +312,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         if (profile == null || profile.builtIn) return;
         var active = Objects.equals(settingsService.activeProviderId(profile.channel), profile.id);
         if (active && hasBusySession(profile.channel)) {
-            listener.toast("任务运行期间不能删除正在使用的供应商");
+            listener.toast(UiMessages.message("任务运行期间不能删除正在使用的供应商"));
             return;
         }
 
@@ -326,7 +328,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         }
         listener.settingsChanged();
         publishProviderStatus();
-        listener.toast("供应商已删除");
+        listener.toast(UiMessages.message("供应商已删除"));
     }
 
     void updateSetting(String key, String value) {
@@ -384,8 +386,8 @@ final class ProviderSettingsCoordinator implements Disposable {
 
     void browseNotificationSound() {
         var chooser = new JFileChooser(root.toFile());
-        chooser.setDialogTitle("选择自定义提示音");
-        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("音频文件（WAV、MP3、AIFF）", "wav", "mp3", "aif", "aiff"));
+        chooser.setDialogTitle(UiMessages.message("选择自定义提示音"));
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(UiMessages.message("音频文件（WAV、MP3、AIFF）"), "wav", "mp3", "aif", "aiff"));
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
         var settings = CodexSettingsState.getInstance().getState();
         settings.notificationSound = "custom";
@@ -396,12 +398,12 @@ final class ProviderSettingsCoordinator implements Disposable {
     void playConfiguredSound(boolean reportError) {
         var settings = CodexSettingsState.getInstance().getState();
         if (Objects.equals(settings.notificationSound, "custom") && settings.customSoundPath.isBlank()) {
-            if (reportError) listener.toast("请先选择自定义音频文件");
+            if (reportError) listener.toast(UiMessages.message("请先选择自定义音频文件"));
             return;
         }
         attentionService.playConfigured(settings).exceptionally(error -> {
             if (reportError) ApplicationManager.getApplication().invokeLater(
-                () -> listener.toast("提示音播放失败：" + errorMessage(error)));
+                () -> listener.toast(UiMessages.message("提示音播放失败：") + errorMessage(error)));
             return null;
         });
     }
@@ -415,14 +417,14 @@ final class ProviderSettingsCoordinator implements Disposable {
     void addCustomModel() {
         var model = Messages.showInputDialog(
             project,
-            "输入供应商接受的完整模型 ID：",
-            "添加自定义模型",
+            UiMessages.message("输入供应商接受的完整模型 ID："),
+            UiMessages.message("添加自定义模型"),
             Messages.getQuestionIcon()
         );
         if (model == null) return;
         model = model.trim();
         if (model.isBlank()) {
-            listener.toast("模型 ID 不能为空");
+            listener.toast(UiMessages.message("模型 ID 不能为空"));
             return;
         }
 
@@ -436,7 +438,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         else if (Objects.equals(profile.channel, CodexSettingsState.CLAUDE_CHANNEL)) settings.claudeModel = model;
         else settings.model = model;
         listener.settingsChanged();
-        listener.toast("已添加并选择自定义模型：" + model);
+        listener.toast(UiMessages.message("已添加并选择自定义模型：") + model);
     }
 
     void removeCustomModel(String model) {
@@ -457,7 +459,7 @@ final class ProviderSettingsCoordinator implements Disposable {
             else settings.model = nextModel;
         }
         listener.settingsChanged();
-        listener.toast("已移除自定义模型：" + model);
+        listener.toast(UiMessages.message("已移除自定义模型：") + model);
     }
 
     void toggleThinking() {
@@ -472,7 +474,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         settings.projectInstructions = string(request, "project", "").trim();
         CodexProjectSettingsState.getInstance(project).getState().projectInstructions = "";
         listener.settingsChanged();
-        listener.toast("指令已保存到用户级配置，将从下一个新会话开始生效");
+        listener.toast(UiMessages.message("指令已保存到用户级配置，将从下一个新会话开始生效"));
     }
 
     void savePrompt(JsonObject request) {
@@ -483,7 +485,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var description = string(request, "description", "").trim();
         var instructions = string(request, "instructions", "").trim();
         if (name.isBlank() || instructions.isBlank()) {
-            listener.toast("提示词名称和内容不能为空");
+            listener.toast(UiMessages.message("提示词名称和内容不能为空"));
             return;
         }
         CodexSettingsState.PromptPreset target = null;
@@ -498,7 +500,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         }
         settings.activePromptId = target.id;
         listener.settingsChanged();
-        listener.toast("提示词已保存");
+        listener.toast(UiMessages.message("提示词已保存"));
     }
 
     void deletePrompt(String id) {
@@ -514,7 +516,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var settings = CodexSettingsState.getInstance().getState();
         settings.activePromptId = settings.prompts.stream().anyMatch(prompt -> Objects.equals(prompt.id, id)) ? id : "";
         listener.settingsChanged();
-        listener.toast(settings.activePromptId.isBlank() ? "已停用提示词" : "提示词将在下一个新会话生效");
+        listener.toast(settings.activePromptId.isBlank() ? UiMessages.message("已停用提示词") : UiMessages.message("提示词将在下一个新会话生效"));
     }
 
     void saveAgent(JsonObject request) {
@@ -523,7 +525,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var name = string(request, "name", "").trim();
         var instructions = string(request, "instructions", "").trim();
         if (name.isBlank() || instructions.isBlank()) {
-            listener.toast("Agent 名称和身份指令不能为空");
+            listener.toast(UiMessages.message("Agent 名称和身份指令不能为空"));
             return;
         }
 
@@ -539,7 +541,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         }
         settings.activeAgentId = target.id;
         listener.settingsChanged();
-        listener.toast("Agent 身份已保存");
+        listener.toast(UiMessages.message("Agent 身份已保存"));
     }
 
     void deleteAgent(String id) {
@@ -553,7 +555,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var settings = CodexSettingsState.getInstance().getState();
         settings.activeAgentId = settings.agents.stream().anyMatch(agent -> Objects.equals(agent.id, id)) ? id : "";
         listener.settingsChanged();
-        listener.toast(settings.activeAgentId.isBlank() ? "已停用 Agent 身份" : "Agent 身份将在下一个新会话生效");
+        listener.toast(settings.activeAgentId.isBlank() ? UiMessages.message("已停用 Agent 身份") : UiMessages.message("Agent 身份将在下一个新会话生效"));
     }
 
     String activeModel(CodexSettingsState.StateData settings) {
@@ -663,7 +665,7 @@ final class ProviderSettingsCoordinator implements Disposable {
                 () -> applyModelOptions(profileId, profileRevision, modelIds, null)
             )
         ).exceptionally(error -> {
-            ApplicationManager.getApplication().invokeLater(() -> listener.asyncError("无法读取供应商模型列表", error));
+            ApplicationManager.getApplication().invokeLater(() -> listener.asyncError(UiMessages.message("无法读取供应商模型列表"), error));
             return null;
         });
     }
@@ -689,7 +691,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         if (!Objects.equals(activeSession().provider(), profile.channel)
             || !Objects.equals(activeProfile.id, profile.id)) return;
         if (!Objects.equals(currentModel, nextModel) && !currentModel.isBlank()) {
-            listener.toast("当前供应商不支持模型 " + currentModel + "，已切换到 " + nextModel);
+            listener.toast(UiMessages.message("当前供应商不支持模型 ") + currentModel + UiMessages.message("，已切换到 ") + nextModel);
         }
         listener.modelOptionsChanged();
     }
@@ -733,20 +735,20 @@ final class ProviderSettingsCoordinator implements Disposable {
         var profile = settingsService.provider(profileId);
         // 请求期间配置被编辑或删除时丢弃旧结果，避免启用过期连接信息。
         if (profile == null || profile.revision != profileRevision) {
-            if (profile != null) listener.toast("供应商配置已变化，请重新启用");
+            if (profile != null) listener.toast(UiMessages.message("供应商配置已变化，请重新启用"));
             publishProviderStatus();
             return;
         }
         // 模型目录返回期间可能启动了任务，此时仍保持原供应商。
         if (hasBusySession(channel)) {
-            listener.toast("任务运行期间不能切换供应商配置");
+            listener.toast(UiMessages.message("任务运行期间不能切换供应商配置"));
             publishProviderStatus();
             return;
         }
 
         var selectedModel = selectProviderModel(modelOptions(profile, modelIds), profile.model, "");
         if (selectedModel.isBlank()) {
-            listener.toast("无法启用供应商：模型目录未返回可用模型");
+            listener.toast(UiMessages.message("无法启用供应商：模型目录未返回可用模型"));
             publishProviderStatus();
             return;
         }
@@ -763,7 +765,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         var profile = CodexSettingsState.getInstance().provider(profileId);
         // 只报告当前版本的失败，旧请求不能覆盖用户随后完成的编辑。
         if (profile != null && profile.revision == profileRevision) {
-            listener.toast("无法启用供应商：" + errorMessage(error));
+            listener.toast(UiMessages.message("无法启用供应商：") + errorMessage(error));
         }
         publishProviderStatus();
     }
@@ -781,7 +783,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         applyProviderRuntimeChange(profile.channel);
         listener.settingsChanged();
         publishProviderStatus();
-        listener.toast("已启用供应商：" + profile.name);
+        listener.toast(UiMessages.message("已启用供应商：") + profile.name);
     }
 
     private boolean validProviderUrl(String value) {
@@ -805,7 +807,7 @@ final class ProviderSettingsCoordinator implements Disposable {
             return;
         }
         codex.restart().thenRun(() -> loadModels(channel)).exceptionally(error -> {
-            listener.asyncError("切换 GPT 供应商失败", error);
+            listener.asyncError(UiMessages.message("切换 GPT 供应商失败"), error);
             return null;
         });
     }

@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.actions.RevealFileAction;
 import com.intellij.openapi.Disposable;
@@ -49,8 +51,8 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
     private final ToolWindow toolWindow;
     private final SidebarSettings settings;
     private final Tree tree = new Tree(new DefaultMutableTreeNode("VCS Changelist"));
-    private final JBLabel summary = new JBLabel("读取 IDE 版本控制状态…");
-    private final JBLabel status = new JBLabel("双击文本文件查看 diff；二进制文件仅展示");
+    private final JBLabel summary = new JBLabel(UiMessages.message("读取 IDE 版本控制状态…"));
+    private final JBLabel status = new JBLabel(UiMessages.message("双击文本文件查看 diff；二进制文件仅展示"));
     private final AtomicBoolean snapshotNotificationPending = new AtomicBoolean();
     private final FileOperationOverlay fileOperations = new FileOperationOverlay();
     private CancellablePromise<PreparedSnapshot> snapshotPromise;
@@ -69,7 +71,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         settings = project.getService(SidebarSettings.class);
         scanUnopenedEnabled = settings.snapshot().scanUnopened;
         tree.setRootVisible(false); tree.setShowsRootHandles(true); tree.setCellRenderer(new Renderer());
-        tree.getEmptyText().setText("当前没有本地 VCS 变更");
+        tree.getEmptyText().setText(UiMessages.message("当前没有本地 VCS 变更"));
         tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
         tree.setTransferHandler(new ChangeListFileTransferHandler(ProjectScope.forBasePath(project.getBasePath()).root()));
         tree.setDragEnabled(true);
@@ -161,21 +163,21 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
 
     private DefaultActionGroup actions() {
         DefaultActionGroup actions = new DefaultActionGroup();
-        actions.add(action("刷新 VCS", AllIcons.Actions.Refresh, this::refreshVcs));
-        actions.add(action("显示 Diff（Enter）", AllIcons.Actions.Diff, this::openSelected));
-        actions.add(action("AI 注释选中范围（文件 / 目录 / Changelist）", AllIcons.General.Information,
+        actions.add(action(UiMessages.message("刷新 VCS"), AllIcons.Actions.Refresh, this::refreshVcs));
+        actions.add(action(UiMessages.message("显示 Diff（Enter）"), AllIcons.Actions.Diff, this::openSelected));
+        actions.add(action(UiMessages.message("AI 注释选中范围（文件 / 目录 / Changelist）"), AllIcons.General.Information,
                 () -> showAiBatch(tree.getSelectionPath())));
         actions.add(new AutoRefreshAction()); actions.addSeparator();
-        actions.add(action("展开所有目录", AllIcons.Actions.Expandall, () -> {
+        actions.add(action(UiMessages.message("展开所有目录"), AllIcons.Actions.Expandall, () -> {
             for (int i = 0; i < tree.getRowCount(); i++) tree.expandRow(i);
         }));
-        actions.add(action("折叠所有目录", AllIcons.Actions.Collapseall, () -> {
+        actions.add(action(UiMessages.message("折叠所有目录"), AllIcons.Actions.Collapseall, () -> {
             for (int i = tree.getRowCount() - 1; i >= 0; i--) tree.collapseRow(i);
         }));
-        actions.add(action("忽略列表 / 恢复跟踪", AllIcons.General.Filter, this::showIgnoreList));
-        actions.add(action("侧栏设置", AllIcons.General.Settings,
+        actions.add(action(UiMessages.message("忽略列表 / 恢复跟踪"), AllIcons.General.Filter, this::showIgnoreList));
+        actions.add(action(UiMessages.message("侧栏设置"), AllIcons.General.Settings,
                 () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, SidebarConfigurable.class)));
-        actions.add(action("IDE 版本控制连接", AllIcons.Nodes.PpWeb,
+        actions.add(action(UiMessages.message("IDE 版本控制连接"), AllIcons.Nodes.PpWeb,
                 () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, "vcs")));
         return actions;
     }
@@ -190,14 +192,14 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (expired()) return;
         var menu = new DefaultActionGroup();
         ChangeTree.Node entry = selected == null ? null : node(selected);
-        if (entry != null) menu.add(action("AI 注释此文件 / 目录 / Changelist…", AllIcons.General.Information,
+        if (entry != null) menu.add(action(UiMessages.message("AI 注释此文件 / 目录 / Changelist…"), AllIcons.General.Information,
                 () -> showAiBatch(selected)));
         if (entry != null && entry.path() != null) {
             ChangedFile file = entry.file();
             Path path = entry.path();
             if (file != null) {
-                menu.add(menuAction("显示 / 跳转到 Diff", AllIcons.Actions.Diff, !file.binary(), () -> openFileDiff(file)));
-                menu.add(menuAction("在编辑器中打开", AllIcons.Actions.Edit,
+                menu.add(menuAction(UiMessages.message("显示 / 跳转到 Diff"), AllIcons.Actions.Diff, !file.binary(), () -> openFileDiff(file)));
+                menu.add(menuAction(UiMessages.message("在编辑器中打开"), AllIcons.Actions.Edit,
                         !file.binary() && file.kind() != ChangedFile.Kind.DELETED,
                         () -> NodeFileActions.openInEditor(project, path, this::expired, this::setStatus)));
                 menu.addSeparator();
@@ -216,33 +218,33 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
                 }
                 menu.addSeparator();
             }
-            menu.add(menuAction("在项目窗口中定位", AllIcons.General.Locate,
+            menu.add(menuAction(UiMessages.message("在项目窗口中定位"), AllIcons.General.Locate,
                     file == null || file.kind() != ChangedFile.Kind.DELETED,
                     () -> NodeFileActions.locateInProject(project, path, this::expired, this::setStatus)));
-            menu.add(menuAction("在资源管理器中显示", AllIcons.Nodes.Folder, RevealFileAction.isSupported(),
+            menu.add(menuAction(UiMessages.message("在资源管理器中显示"), AllIcons.Nodes.Folder, RevealFileAction.isSupported(),
                     () -> NodeFileActions.reveal(project, path, this::expired, this::setStatus)));
             menu.addSeparator();
-            menu.add(action("复制绝对路径", AllIcons.Actions.Copy, () -> copyPath(path, false)));
-            menu.add(action("复制项目相对路径", AllIcons.Actions.Copy, () -> copyPath(path, true)));
-            menu.add(action(file == null ? "复制目录名" : "复制文件名", null,
+            menu.add(action(UiMessages.message("复制绝对路径"), AllIcons.Actions.Copy, () -> copyPath(path, false)));
+            menu.add(action(UiMessages.message("复制项目相对路径"), AllIcons.Actions.Copy, () -> copyPath(path, true)));
+            menu.add(action(file == null ? UiMessages.message("复制目录名") : UiMessages.message("复制文件名"), null,
                     () -> copyText(path.getFileName().toString())));
             if (file == null) {
                 menu.addSeparator();
-                menu.add(action("展开此目录及子目录", AllIcons.Actions.Expandall, () -> expandSubtree(selected)));
-                menu.add(action("折叠此目录及子目录", AllIcons.Actions.Collapseall, () -> collapseSubtree(selected)));
+                menu.add(action(UiMessages.message("展开此目录及子目录"), AllIcons.Actions.Expandall, () -> expandSubtree(selected)));
+                menu.add(action(UiMessages.message("折叠此目录及子目录"), AllIcons.Actions.Collapseall, () -> collapseSubtree(selected)));
             }
             menu.addSeparator();
             if (ProjectScope.forBasePath(project.getBasePath()).contains(path)) {
-                menu.add(action(file == null ? "永久忽略此目录（含子目录）" : "永久忽略此文件", AllIcons.General.Filter,
+                menu.add(action(file == null ? UiMessages.message("永久忽略此目录（含子目录）") : UiMessages.message("永久忽略此文件"), AllIcons.General.Filter,
                         () -> ignorePath(path, file == null)));
             }
-            menu.add(action(file == null ? "刷新此目录" : "刷新此文件", AllIcons.Actions.Refresh,
+            menu.add(action(file == null ? UiMessages.message("刷新此目录") : UiMessages.message("刷新此文件"), AllIcons.Actions.Refresh,
                     () -> { refreshVcs(path, file == null); refreshUnopened(true); }));
         } else {
-            menu.add(action("刷新 VCS", AllIcons.Actions.Refresh, this::refreshVcs));
+            menu.add(action(UiMessages.message("刷新 VCS"), AllIcons.Actions.Refresh, this::refreshVcs));
         }
-        menu.add(action("忽略列表 / 恢复跟踪…", AllIcons.General.Filter, this::showIgnoreList));
-        menu.add(action("侧栏设置", AllIcons.General.Settings,
+        menu.add(action(UiMessages.message("忽略列表 / 恢复跟踪…"), AllIcons.General.Filter, this::showIgnoreList));
+        menu.add(action(UiMessages.message("侧栏设置"), AllIcons.General.Settings,
                 () -> ShowSettingsUtil.getInstance().showSettingsDialog(project, SidebarConfigurable.class)));
         var popup = ActionManager.getInstance().createActionPopupMenu("VcsChangelistSidebar.ContextMenu", menu);
         popup.setTargetComponent(tree);
@@ -257,7 +259,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (selected != null) collectAiSources(node(selected), sources);
         else for (var group : lastGroups) for (var file : group.files()) addAiSource(file, sources);
         if (sources.isEmpty() && project.getService(com.codexgui.changelist.ai.AiSessionStore.class).lastBatch() == null) {
-            setStatus("所选范围没有可供 AI 解释的文本变更"); return;
+            setStatus(UiMessages.message("所选范围没有可供 AI 解释的文本变更")); return;
         }
         new com.codexgui.changelist.ai.AiBatchDialog(project, sources, source -> {
             if (expired()) return;
@@ -283,7 +285,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         data.restoredPaths.removeIf(restored -> restored.equalsIgnoreCase(entry)
                 || (directory && restored.regionMatches(true, 0, entry, 0, entry.length())));
         settings.update(project, data);
-        setStatus("已永久忽略：" + entry + " · 可在忽略列表中恢复跟踪");
+        setStatus(UiMessages.message("已永久忽略：") + entry + UiMessages.message(" · 可在忽略列表中恢复跟踪"));
     }
 
     private void refreshUnopened(boolean force) {
@@ -303,12 +305,12 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
     private void copyPath(Path path, boolean relative) {
         var scope = ProjectScope.forBasePath(project.getBasePath());
         if (scope.root() == null || (!scope.contains(path) && !scope.root().equals(path.normalize()))) {
-            setStatus("已跳过项目目录外的路径"); return;
+            setStatus(UiMessages.message("已跳过项目目录外的路径")); return;
         }
         String text = relative ? scope.root().relativize(path.normalize()).toString().replace('\\', '/') : path.toString();
         copyText(text.isEmpty() ? "." : text);
     }
-    private void copyText(String text) { CopyPasteManager.copyTextToClipboard(text); setStatus("已复制到剪贴板"); }
+    private void copyText(String text) { CopyPasteManager.copyTextToClipboard(text); setStatus(UiMessages.message("已复制到剪贴板")); }
 
     private void expandSubtree(TreePath selected) {
         int row = tree.getRowForPath(selected);
@@ -327,7 +329,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         tree.collapsePath(selected);
     }
     private final class AutoRefreshAction extends ToggleAction implements DumbAware {
-        AutoRefreshAction() { super("定时刷新（访问服务器）", "默认关闭；启用后窗口显示时定期请求 VCS，可能产生大量流量", AllIcons.Actions.Refresh); }
+        AutoRefreshAction() { super(UiMessages.message("定时刷新（访问服务器）"), UiMessages.message("默认关闭；启用后窗口显示时定期请求 VCS，可能产生大量流量"), AllIcons.Actions.Refresh); }
         @Override public @NotNull ActionUpdateThread getActionUpdateThread() { return ActionUpdateThread.EDT; }
         @Override public boolean isSelected(@NotNull AnActionEvent event) { return settings.snapshot().autoRefresh; }
         @Override public void setSelected(@NotNull AnActionEvent event, boolean selected) {
@@ -361,7 +363,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (scope.root() == null || !ProjectLevelVcsManager.getInstance(project).hasActiveVcss()) {
             requestSnapshot(); return;
         }
-        setStatus("已请求 IDE 原生 VCS 刷新，等待变更更新…");
+        setStatus(UiMessages.message("已请求 IDE 原生 VCS 刷新，等待变更更新…"));
         // Invoke the native refresh action so each supported IDE performs its own preparation.
         var nativeRefresh = ActionManager.getInstance().getAction("Vcs.RefreshStatuses");
         if (nativeRefresh != null) ActionManager.getInstance().tryToExecute(nativeRefresh, null, tree, "CodeDeck.Changes.Refresh", true);
@@ -397,7 +399,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         }
         if (!ProjectLevelVcsManager.getInstance(project).hasActiveVcss()) { requestSnapshot(); return; }
         vcsRefreshing = true;
-        setStatus("正在刷新 IDE 版本控制状态…");
+        setStatus(UiMessages.message("正在刷新 IDE 版本控制状态…"));
         // The active Perforce/Git provider performs this refresh using its existing connection and credentials.
         var dirty = VcsDirtyScopeManager.getInstance(project);
         var filePath = VcsUtil.getFilePath(path, directory);
@@ -429,7 +431,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
             if (!(error instanceof java.util.concurrent.CancellationException)
                     && !(error instanceof com.intellij.openapi.progress.ProcessCanceledException)) {
                 ApplicationManager.getApplication().invokeLater(() -> {
-                    if (!expired()) setStatus("读取 IDE 变更失败：" + error.getMessage());
+                    if (!expired()) setStatus(UiMessages.message("读取 IDE 变更失败：") + error.getMessage());
                 });
             }
         });
@@ -476,19 +478,19 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         long binary = lastGroups.stream().flatMap(g -> g.files().stream()).filter(ChangedFile::binary).count();
         boolean configured = !snapshot.vcsNames().isBlank();
         boolean scoped = snapshot.projectRoot() != null;
-        summary.setText(!scoped ? "无法确定当前项目目录" : configured
-                ? snapshot.vcsNames() + " · 当前项目 · " + count + " 个文件 · 二进制 " + binary : "项目尚未配置版本控制");
+        summary.setText(!scoped ? UiMessages.message("无法确定当前项目目录") : configured
+                ? snapshot.vcsNames() + UiMessages.message(" · 当前项目 · ") + count + UiMessages.message(" 个文件 · 二进制 ") + binary : UiMessages.message("项目尚未配置版本控制"));
         var scanner = project.getService(UnopenedChanges.class);
         String scanStatus = scanner == null ? "" : scanner.status();
-        summary.setToolTipText(scoped ? "范围：" + snapshot.projectRoot() + (scanStatus.isBlank() ? "" : " · " + scanStatus)
-                : "请打开具体项目目录；磁盘根目录不作为捕获范围");
-        tree.getEmptyText().setText(!scoped ? "请打开具体项目目录" : configured
-                ? "当前项目没有本地 VCS 变更" : "请先在 IDE 的 Version Control 中配置 Perforce / Git");
-        if (!scoped) { setStatus("未读取变更：无法确定具体项目目录"); return; }
+        summary.setToolTipText(scoped ? UiMessages.message("范围：") + snapshot.projectRoot() + (scanStatus.isBlank() ? "" : " · " + scanStatus)
+                : UiMessages.message("请打开具体项目目录；磁盘根目录不作为捕获范围"));
+        tree.getEmptyText().setText(!scoped ? UiMessages.message("请打开具体项目目录") : configured
+                ? UiMessages.message("当前项目没有本地 VCS 变更") : UiMessages.message("请先在 IDE 的 Version Control 中配置 Perforce / Git"));
+        if (!scoped) { setStatus(UiMessages.message("未读取变更：无法确定具体项目目录")); return; }
         if (!diffBusy && !vcsRefreshing && !fileActionBusy) setStatus(configured
-                ? (scanStatus.isBlank() ? "已同步 " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-                + " · 双击文本文件查看 diff" : scanStatus)
-                : "点击工具栏的版本控制连接按钮，复用 IDE 配置");
+                ? (scanStatus.isBlank() ? UiMessages.message("已同步 ") + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+                + UiMessages.message(" · 双击文本文件查看 diff") : scanStatus)
+                : UiMessages.message("点击工具栏的版本控制连接按钮，复用 IDE 配置"));
     }
 
     private static DefaultMutableTreeNode swingNode(ChangeTree.Node node, Map<String, DefaultMutableTreeNode> nodes) {
@@ -509,22 +511,22 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (expired() || file == null || file.binary()
                 || !ProjectScope.forBasePath(project.getBasePath()).contains(file.path())) return false;
         if (!NativeDiffTabs.focusExisting(project, file.path())) return false;
-        setStatus("已切换到此文件的 VCS Diff"); return true;
+        setStatus(UiMessages.message("已切换到此文件的 VCS Diff")); return true;
     }
     private void openFileDiff(ChangedFile file) {
         if (expired() || file == null) return;
         if (!ProjectScope.forBasePath(project.getBasePath()).contains(file.path())) {
-            setStatus("已跳过项目目录外的文件"); requestSnapshot(); return;
+            setStatus(UiMessages.message("已跳过项目目录外的文件")); requestSnapshot(); return;
         }
-        if (file.binary()) { setStatus("已跳过二进制文件：" + file.path().getFileName()); return; }
+        if (file.binary()) { setStatus(UiMessages.message("已跳过二进制文件：") + file.path().getFileName()); return; }
         if (focusExisting(file)) return;
         var target = targets.get(file.id()); if (target == null) { requestSnapshot(); return; }
-        if (diffBusy) { setStatus("正在读取上一个 diff，请稍候"); return; }
+        if (diffBusy) { setStatus(UiMessages.message("正在读取上一个 diff，请稍候")); return; }
         diffBusy = true;
         NativeDiffOpener.open(project, file.path(), target, this::expired, this::setStatus, () -> diffBusy = false);
     }
     private void setStatus(String text) {
-        String safe = text == null ? "未知错误" : text.replace('\n', ' ').replace('\r', ' ');
+        String safe = text == null ? UiMessages.message("未知错误") : text.replace('\n', ' ').replace('\r', ' ');
         status.setText(safe.startsWith("<html>") ? " " + safe : safe); status.setToolTipText(status.getText());
     }
     @Override public void dispose() {
@@ -553,7 +555,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
                 default -> new JBColor(0x2874B5, 0x78A9E2);
             };
             append(data.label(), new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, color));
-            append("  [" + file.kind().label() + "]" + (file.binary() ? " [二进制]" : ""), SimpleTextAttributes.GRAYED_ATTRIBUTES);
+            append("  [" + file.kind().label() + "]" + (file.binary() ? UiMessages.message(" [二进制]") : ""), SimpleTextAttributes.GRAYED_ATTRIBUTES);
             setToolTipText(file.path().toString());
         }
     }

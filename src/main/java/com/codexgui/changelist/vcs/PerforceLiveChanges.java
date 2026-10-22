@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
@@ -158,7 +160,7 @@ final class PerforceLiveChanges implements Disposable {
         activeUrgent = paths.stream().anyMatch(urgent::contains);
         pending.removeAll(paths); urgent.removeAll(paths); immediate.removeAll(paths);
         preempt = false; running = true;
-        new Task.Backgroundable(project, "检测本地文件变更", true) {
+        new Task.Backgroundable(project, UiMessages.message("检测本地文件变更"), true) {
             private final List<LiveChangesOverlay.Update> results = new ArrayList<>();
             private Map<Path, Unsaved> documents = Map.of();
             @Override public void run(@NotNull ProgressIndicator indicator) {
@@ -219,7 +221,7 @@ final class PerforceLiveChanges implements Disposable {
                                     if (before == null) {
                                         checkScanning(indicator);
                                         before = new PerforceContentRevision(project, VcsUtil.getFilePath(path, false), baseline.revision()).getContent();
-                                        if (before == null) throw new IllegalStateException("无法读取工作区基准版本：" + path);
+                                        if (before == null) throw new IllegalStateException(UiMessages.message("无法读取工作区基准版本：") + path);
                                         // Cache only small editor baselines, never the entire project's contents.
                                         if (before.length() <= 1024 * 1024) {
                                             if (baselines.size() >= 16) baselines.remove(baselines.keySet().iterator().next());
@@ -267,7 +269,7 @@ final class PerforceLiveChanges implements Disposable {
             }
             @Override public void onThrowable(@NotNull Throwable error) {
                 if (enabled() && preempt) { requeue(); return; }
-                if (enabled()) failed.accept("自动检测本地修改失败（保留上次结果）：" + error.getMessage());
+                if (enabled()) failed.accept(UiMessages.message("自动检测本地修改失败（保留上次结果）：") + error.getMessage());
             }
             @Override public void onCancel() {
                 if (enabled() && preempt) requeue();

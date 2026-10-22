@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.diff.contents.DocumentContent;
 import com.intellij.diff.contents.EmptyContent;
 import com.intellij.diff.requests.ContentDiffRequest;
@@ -28,10 +30,10 @@ public final class NativeDiffOpener {
     public static void open(Project project, Path path, NativeChanges.DiffTarget target, BooleanSupplier expired,
                             Consumer<String> status, Runnable finished) {
         if (NativeDiffTabs.focusExisting(project, path)) {
-            status.accept("已切换到此文件的 VCS Diff"); finished.run(); return;
+            status.accept(UiMessages.message("已切换到此文件的 VCS Diff")); finished.run(); return;
         }
-        status.accept("正在读取 VCS Diff…");
-        new Task.Backgroundable(project, "读取 VCS Diff", true) {
+        status.accept(UiMessages.message("正在读取 VCS Diff…"));
+        new Task.Backgroundable(project, UiMessages.message("读取 VCS Diff"), true) {
             private DiffRequest request;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 if (expired.getAsBoolean()) return;
@@ -43,13 +45,13 @@ public final class NativeDiffOpener {
             @Override public void onSuccess() {
                 if (!expired.getAsBoolean() && request != null) {
                     NativeDiffTabs.show(project, path, request);
-                    status.accept("已打开 VCS Diff");
+                    status.accept(UiMessages.message("已打开 VCS Diff"));
                 }
             }
             @Override public void onThrowable(@NotNull Throwable error) {
-                if (!expired.getAsBoolean()) status.accept("Diff 失败：" + error.getMessage());
+                if (!expired.getAsBoolean()) status.accept(UiMessages.message("Diff 失败：") + error.getMessage());
             }
-            @Override public void onCancel() { if (!expired.getAsBoolean()) status.accept("已取消读取 diff"); }
+            @Override public void onCancel() { if (!expired.getAsBoolean()) status.accept(UiMessages.message("已取消读取 diff")); }
             @Override public void onFinished() { finished.run(); }
         }.queue();
     }
@@ -59,15 +61,15 @@ public final class NativeDiffOpener {
                                       BooleanSupplier expired) throws Exception {
         indicator.checkCanceled();
         Change change = target.resolve(project);
-        if (NativeChanges.isBinary(change)) throw new IOException("已跳过二进制文件");
+        if (NativeChanges.isBinary(change)) throw new IOException(UiMessages.message("已跳过二进制文件"));
         var producer = ChangeDiffRequestProducer.create(project, change);
-        if (producer == null) throw new IOException("IDE 无法为此文件提供 diff");
+        if (producer == null) throw new IOException(UiMessages.message("IDE 无法为此文件提供 diff"));
         if (change.getAfterRevision() != null) {
             Path local = Path.of(change.getAfterRevision().getFile().getPath());
             if (Files.isRegularFile(local)) {
-                if (Files.size(local) > MAX_BYTES) throw new IOException("文件超过 20 MiB，已跳过 diff");
+                if (Files.size(local) > MAX_BYTES) throw new IOException(UiMessages.message("文件超过 20 MiB，已跳过 diff"));
                 try (var stream = Files.newInputStream(local)) {
-                    if (!TextGuard.isProbablyText(stream.readNBytes(8192))) throw new IOException("文件内容为二进制，已跳过 diff");
+                    if (!TextGuard.isProbablyText(stream.readNBytes(8192))) throw new IOException(UiMessages.message("文件内容为二进制，已跳过 diff"));
                 }
             }
         }
@@ -76,7 +78,7 @@ public final class NativeDiffOpener {
         DiffRequest candidate = producer.process(new UserDataHolderBase(), indicator);
         boolean textOnly = ReadAction.nonBlocking(() -> textOnly(candidate)).wrapProgress(indicator)
                 .expireWhen(expired).executeSynchronously();
-        if (!textOnly) throw new IOException("此文件无法作为文本比较，已跳过 diff");
+        if (!textOnly) throw new IOException(UiMessages.message("此文件无法作为文本比较，已跳过 diff"));
         return candidate;
     }
 

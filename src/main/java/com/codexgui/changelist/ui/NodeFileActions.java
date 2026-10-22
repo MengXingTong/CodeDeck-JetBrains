@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.ide.actions.RevealFileAction;
 import com.intellij.ide.projectView.ProjectView;
 import com.intellij.openapi.fileEditor.FileEditorManager;
@@ -27,7 +29,7 @@ final class NodeFileActions {
     static void openInEditor(Project project, Path path, BooleanSupplier expired, Consumer<String> status) {
         withVirtualFile(project, path, true, expired, status, file -> {
             FileEditorManager.getInstance(project).openFile(file, true);
-            status.accept("已在编辑器中打开文件");
+            status.accept(UiMessages.message("已在编辑器中打开文件"));
         });
     }
 
@@ -35,37 +37,37 @@ final class NodeFileActions {
         withVirtualFile(project, path, false, expired, status, file -> {
             var projectWindow = ToolWindowManager.getInstance(project).getToolWindow(ToolWindowId.PROJECT_VIEW);
             if (projectWindow == null) {
-                status.accept("项目窗口不可用，无法定位");
+                status.accept(UiMessages.message("项目窗口不可用，无法定位"));
                 return;
             }
             projectWindow.activate(() -> {
                 if (expired.getAsBoolean() || !file.isValid()) return;
                 ProjectView.getInstance(project).select(file, file, true);
-                status.accept("已在项目窗口中定位");
+                status.accept(UiMessages.message("已在项目窗口中定位"));
             }, true);
         });
     }
 
     private static void withVirtualFile(Project project, Path path, boolean editor, BooleanSupplier expired,
                                         Consumer<String> status, Consumer<VirtualFile> action) {
-        new Task.Backgroundable(project, editor ? "打开本地文件" : "定位项目文件", true) {
+        new Task.Backgroundable(project, editor ? UiMessages.message("打开本地文件") : UiMessages.message("定位项目文件"), true) {
             private VirtualFile file;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 if (expired.getAsBoolean()) return;
                 var scope = ProjectScope.forBasePath(project.getBasePath());
-                if (!allowed(scope, path)) throw new IllegalStateException("已跳过项目目录外的路径");
+                if (!allowed(scope, path)) throw new IllegalStateException(UiMessages.message("已跳过项目目录外的路径"));
                 indicator.checkCanceled();
                 if (editor) {
-                    if (!Files.isRegularFile(path)) throw new IllegalStateException("本地文件不存在，无法在编辑器中打开");
+                    if (!Files.isRegularFile(path)) throw new IllegalStateException(UiMessages.message("本地文件不存在，无法在编辑器中打开"));
                     try (var stream = Files.newInputStream(path)) {
                         if (!TextGuard.isProbablyText(stream.readNBytes(8192))) {
-                            throw new IllegalStateException("已跳过二进制文件");
+                            throw new IllegalStateException(UiMessages.message("已跳过二进制文件"));
                         }
                     } catch (IOException error) { throw new IllegalStateException(error.getMessage(), error); }
                 }
                 file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
-                if (file == null) throw new IllegalStateException("本地路径不存在，无法定位");
-                if (editor && file.getFileType().isBinary()) throw new IllegalStateException("已跳过二进制文件");
+                if (file == null) throw new IllegalStateException(UiMessages.message("本地路径不存在，无法定位"));
+                if (editor && file.getFileType().isBinary()) throw new IllegalStateException(UiMessages.message("已跳过二进制文件"));
                 indicator.checkCanceled();
             }
             @Override public void onSuccess() {
@@ -78,17 +80,17 @@ final class NodeFileActions {
     }
 
     static void reveal(Project project, Path path, BooleanSupplier expired, Consumer<String> status) {
-        new Task.Backgroundable(project, "定位资源管理器路径", true) {
+        new Task.Backgroundable(project, UiMessages.message("定位资源管理器路径"), true) {
             private Path existing;
             private boolean directory;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 if (expired.getAsBoolean()) return;
                 var scope = ProjectScope.forBasePath(project.getBasePath());
-                if (!allowed(scope, path)) throw new IllegalStateException("已跳过项目目录外的路径");
+                if (!allowed(scope, path)) throw new IllegalStateException(UiMessages.message("已跳过项目目录外的路径"));
                 existing = path.normalize();
                 while (!Files.exists(existing)) {
                     indicator.checkCanceled();
-                    if (existing.equals(scope.root())) throw new IllegalStateException("项目目录已不存在");
+                    if (existing.equals(scope.root())) throw new IllegalStateException(UiMessages.message("项目目录已不存在"));
                     existing = existing.getParent();
                 }
                 directory = Files.isDirectory(existing);
@@ -96,7 +98,7 @@ final class NodeFileActions {
             @Override public void onSuccess() {
                 if (expired.getAsBoolean() || existing == null) return;
                 if (directory) RevealFileAction.openDirectory(existing); else RevealFileAction.openFile(existing);
-                status.accept("已在资源管理器中显示");
+                status.accept(UiMessages.message("已在资源管理器中显示"));
             }
             @Override public void onThrowable(@NotNull Throwable error) {
                 if (!expired.getAsBoolean()) status.accept(error.getMessage());

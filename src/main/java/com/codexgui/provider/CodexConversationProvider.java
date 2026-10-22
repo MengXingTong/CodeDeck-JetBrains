@@ -1,5 +1,7 @@
 package com.codexgui.provider;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.TurnHandle;
 import com.codexgui.service.CodexAppServerService;
 import com.codexgui.service.CodexEventListener;
@@ -121,7 +123,7 @@ public final class CodexConversationProvider implements ConversationProvider, Co
     @Override
     public void onConnectionChanged(boolean connected, String detail) {
         if (connected) return;
-        var error = new IllegalStateException(detail == null || detail.isBlank() ? "Codex app-server 连接已断开" : detail);
+        var error = new IllegalStateException(detail == null || detail.isBlank() ? UiMessages.message("Codex app-server 连接已断开") : detail);
         activeTurns.forEach((handle, active) -> {
             synchronized (active.cancelled()) {
                 active.cancelled().set(true);
@@ -181,7 +183,7 @@ public final class CodexConversationProvider implements ConversationProvider, Co
                     yield new TurnEvent.Failed(handle, new IllegalStateException(CodexError.from(turn).message()), false);
                 }
                 if (status.equals("interrupted")) {
-                    yield new TurnEvent.Failed(handle, new java.util.concurrent.CancellationException("Codex 回合已停止"), true);
+                    yield new TurnEvent.Failed(handle, new java.util.concurrent.CancellationException(UiMessages.message("Codex 回合已停止")), true);
                 }
                 yield new TurnEvent.Completed(handle, string(params, "threadId", ""), "", "");
             }

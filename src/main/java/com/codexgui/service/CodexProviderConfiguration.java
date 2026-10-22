@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.settings.CodexSettingsState;
 import com.codexgui.settings.ProviderCredentialStore;
 import java.nio.file.Path;
@@ -28,9 +30,9 @@ public final class CodexProviderConfiguration {
         if (!provider.builtIn()) {
             // A queued batch must not send a replacement credential to a previous provider URL.
             var current = CodexSettingsState.getInstance().activeProvider(CodexSettingsState.CODEX_CHANNEL).snapshot();
-            if (!sameConnection(provider, current)) throw new IllegalStateException("CodeDeck GPT 供应商已变化，请重新开始任务");
+            if (!sameConnection(provider, current)) throw new IllegalStateException(UiMessages.message("CodeDeck GPT 供应商已变化，请重新开始任务"));
             var apiKey = ProviderCredentialStore.get(provider.id());
-            if (apiKey == null || apiKey.isBlank()) throw new IllegalStateException("当前 GPT 供应商尚未配置 API 密钥");
+            if (apiKey == null || apiKey.isBlank()) throw new IllegalStateException(UiMessages.message("当前 GPT 供应商尚未配置 API 密钥"));
             builder.environment().put("CODEX_GUI_PROVIDER_KEY", apiKey);
         }
     }

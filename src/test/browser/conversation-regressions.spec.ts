@@ -15,6 +15,12 @@ async function captureRequests(page: Page) {
   });
 }
 
+async function requestsOfType(page: Page, type: string) {
+  return page.evaluate(type => (Reflect.get(window, 'historyTestRequests') as {
+    type: string; payload: Record<string, unknown>;
+  }[]).filter(request => request.type === type), type);
+}
+
 test('默认保持已有文件换行，可关闭后进行主动格式转换', async ({page}) => {
   await page.goto('/tools/ui-preview.html');
   await captureRequests(page);
@@ -130,6 +136,7 @@ test('重连提示保留运行和排队状态，后续回复继续显示', async
 test('共享历史区分工作目录并按原会话 ID 打开', async ({page}) => {
   await page.goto('/tools/ui-preview.html');
   await expect(page.getByRole('textbox', {name: '消息'})).toBeVisible();
+  await captureRequests(page);
   await page.locator('[data-action="history"]').click();
   await page.evaluate(() => CodexGui.receive(previewEnvelope('history', {provider: 'codex', items: [
     {id: 'shared-thread-a', title: '桌面会话', cwd: 'D:/Other Project/<shared>', time: '10-09 10:00'},
@@ -142,8 +149,12 @@ test('共享历史区分工作目录并按原会话 ID 打开', async ({page}) =
   await expect(page.locator('[data-thread="shared-thread-b"]')).toContainText('D:/ProjectB');
   await expect(page.locator('.history-meta shared')).toHaveCount(0);
   await page.locator('[data-thread="shared-thread-a"]').click();
-  const sent = await page.evaluate(() => JSON.parse(document.body.dataset.previewLastPayload || '{}'));
-  expect(sent).toMatchObject({type: 'openThread', payload: {id: 'shared-thread-a'}});
+  // 布局通知可以在打开会话请求之后到达；明确重放 CI 中覆盖最后一条消息的时序。
+  await page.evaluate(() => Reflect.get(window, 'codexHost')(JSON.stringify(previewEnvelope('composerBounds', {
+    left: -1, top: -1, right: -1, bottom: -1,
+  }))));
+  await expect.poll(() => requestsOfType(page, 'openThread'))
+    .toMatchObject([{type: 'openThread', payload: {id: 'shared-thread-a'}}]);
 });
 
 test('历史定位运行中的原页签并保留两个页签的草稿和后台输出', async ({page}) => {
@@ -210,14 +221,15 @@ test('外部占用历史显示只读快照，禁止发送且重新打开后恢�
   await expect(page.locator('.history-read-only')).toContainText('其他客户端占用');
   await expect(page.getByTitle('发送', {exact: true})).toBeDisabled();
   await expect(page.getByTitle('回溯', {exact: true})).toBeDisabled();
+  await captureRequests(page);
   await editor.fill('等待释放的草稿');
-  await page.evaluate(() => {document.body.dataset.previewLastPayload = '{}';});
   await editor.press('Enter');
   await expect(editor).toHaveText('等待释放的草稿');
-  expect(await page.evaluate(() => document.body.dataset.previewLastPayload)).toBe('{}');
+  expect(await requestsOfType(page, 'send')).toEqual([]);
+  expect(await requestsOfType(page, 'openThread')).toEqual([]);
   await page.getByRole('button', {name: '重新打开', exact: true}).click();
-  const sent = await page.evaluate(() => JSON.parse(document.body.dataset.previewLastPayload || '{}'));
-  expect(sent).toMatchObject({type: 'openThread', payload: {id: 'external-writer'}});
+  await expect.poll(() => requestsOfType(page, 'openThread'))
+    .toMatchObject([{type: 'openThread', payload: {id: 'external-writer'}}]);
   await page.evaluate(() => CodexGui.receive(previewEnvelope('thread', {
     id: 'external-writer', title: '外部运行会话', provider: 'codex', historyReadOnly: false,
   })));

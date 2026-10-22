@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.fileTypes.FileTypeRegistry;
@@ -45,14 +47,14 @@ public final class NativeChanges {
             }
             // This VFS/provider lookup happens only on explicit diff, never while collecting the tree.
             var file = modifiedWithoutCheckoutPath.getVirtualFile();
-            if (file == null || !file.isValid()) throw new IOException("文件已不存在，请刷新变更列表");
+            if (file == null || !file.isValid()) throw new IOException(UiMessages.message("文件已不存在，请刷新变更列表"));
             var current = ChangeListManager.getInstance(project).getChange(file);
             if (current != null) return current; // The file may have been checked out since the snapshot.
             var vcs = ProjectLevelVcsManager.getInstance(project).getVcsFor(file);
             var provider = vcs == null ? null : vcs.getDiffProvider();
             // Compare with the workspace's current revision (Perforce 'have'), rather than an empty file or depot HEAD.
             var before = provider == null ? null : provider.createCurrentFileContent(file);
-            if (before == null) throw new IOException("IDE 无法读取此文件的工作区基准版本");
+            if (before == null) throw new IOException(UiMessages.message("IDE 无法读取此文件的工作区基准版本"));
             return new Change(before, CurrentContentRevision.create(modifiedWithoutCheckoutPath));
         }
     }
@@ -107,7 +109,7 @@ public final class NativeChanges {
             }
             files.sort(Comparator.comparing(f -> f.path().toString()));
             if (!files.isEmpty()) groups.add(new ChangeTree.Group(list.getId(),
-                    list.isBlank() ? "工作区修改" : list.getName(), List.copyOf(files)));
+                    list.isBlank() ? UiMessages.message("工作区修改") : list.getName(), List.copyOf(files)));
         }
         List<ChangedFile> localFiles = new ArrayList<>();
         // Native changelists win; a full preview then supersedes stale writable-file cache entries.
@@ -143,7 +145,7 @@ public final class NativeChanges {
             targets.put(id, new DiffTarget(null, path));
         }
         localFiles.sort(Comparator.comparing(f -> f.path().toString()));
-        if (!localFiles.isEmpty()) groups.add(new ChangeTree.Group("local", "本地变更", List.copyOf(localFiles)));
+        if (!localFiles.isEmpty()) groups.add(new ChangeTree.Group("local", UiMessages.message("本地变更"), List.copyOf(localFiles)));
         return new Snapshot(List.copyOf(groups), Map.copyOf(targets), names, scope.root());
     }
 

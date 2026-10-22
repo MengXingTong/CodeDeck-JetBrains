@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.codexgui.service.CodexProviderConfiguration;
@@ -17,7 +19,7 @@ import java.util.function.BooleanSupplier;
 public final class CodexCli {
     public record Result(String json, long inputTokens, long cachedTokens, long outputTokens) {
         public String usageText() {
-            return inputTokens < 0 ? "CLI 未提供 token 统计" : "输入 " + inputTokens + "（缓存 " + cachedTokens + "）· 输出 " + outputTokens + " tokens";
+            return inputTokens < 0 ? UiMessages.message("CLI 未提供 token 统计") : UiMessages.message("输入 ") + inputTokens + UiMessages.message("（缓存 ") + cachedTokens + UiMessages.message("）· 输出 ") + outputTokens + " tokens";
         }
     }
     private static final int MAX_OUTPUT = 2 * 1024 * 1024;
@@ -49,19 +51,19 @@ public final class CodexCli {
             long deadline = System.nanoTime() + timeout.toNanos();
             while (!child.waitFor(100, TimeUnit.MILLISECONDS)) {
                 if (canceled.getAsBoolean()) throw new CancellationException();
-                if (System.nanoTime() >= deadline) throw new IOException("Codex 请求超时，已停止；请手动重试");
-                if (stdout.overflow || stderr.overflow) throw new IOException("CLI 输出过大，已停止；未自动重试");
+                if (System.nanoTime() >= deadline) throw new IOException(UiMessages.message("Codex 请求超时，已停止；请手动重试"));
+                if (stdout.overflow || stderr.overflow) throw new IOException(UiMessages.message("CLI 输出过大，已停止；未自动重试"));
             }
             writer.join(1000); outThread.join(2000); errThread.join(2000);
             if (canceled.getAsBoolean()) throw new CancellationException();
-            if (stdout.overflow || stderr.overflow) throw new IOException("CLI 输出超过 2 MiB");
+            if (stdout.overflow || stderr.overflow) throw new IOException(UiMessages.message("CLI 输出超过 2 MiB"));
             if (child.exitValue() != 0) {
                 String detail = stderr.text().strip();
                 if (detail.isBlank()) detail = stdout.text().strip();
                 if (detail.length() > 4000) detail = detail.substring(detail.length() - 4000);
-                throw new IOException("Codex CLI 失败（" + child.exitValue() + "）：" + detail + "\n请检查 CLI 登录、模型和参数；未自动重试");
+                throw new IOException(UiMessages.message("Codex CLI 失败（") + child.exitValue() + "）：" + detail + UiMessages.message("\n请检查 CLI 登录、模型和参数；未自动重试"));
             }
-            if (!Files.isRegularFile(answer) || Files.size(answer) > MAX_OUTPUT) throw new IOException("CLI 未返回有效结果文件");
+            if (!Files.isRegularFile(answer) || Files.size(answer) > MAX_OUTPUT) throw new IOException(UiMessages.message("CLI 未返回有效结果文件"));
             long input = -1, cached = 0, output = 0;
             for (String line : stdout.text().split("\n")) {
                 try {
@@ -71,7 +73,7 @@ public final class CodexCli {
                         input = number(usage, "input_tokens"); cached = number(usage, "cached_input_tokens"); output = number(usage, "output_tokens");
                     }
                     if (event.has("type") && event.get("type").getAsString().equals("turn.failed"))
-                        throw new IOException("Codex 返回失败：" + event.get("error"));
+                        throw new IOException(UiMessages.message("Codex 返回失败：") + event.get("error"));
                 } catch (RuntimeException ignored) { /* Non-event diagnostic lines are not structured output. */ }
             }
             return new Result(Files.readString(answer, StandardCharsets.UTF_8), input, cached, output);
@@ -97,7 +99,7 @@ public final class CodexCli {
                 "-c", "features.fast_mode=" + options.fast()));
         if (!options.model().isEmpty()) args.addAll(List.of("--model", options.model()));
         if (!options.effort().isEmpty()) {
-            if (!options.effort().matches("[a-z]+")) throw new IllegalArgumentException("思考程度无效");
+            if (!options.effort().matches("[a-z]+")) throw new IllegalArgumentException(UiMessages.message("思考程度无效"));
             args.addAll(List.of("-c", "model_reasoning_effort=\"" + options.effort() + "\""));
         }
         args.add("-"); return List.copyOf(args);

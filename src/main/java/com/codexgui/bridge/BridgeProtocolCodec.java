@@ -1,5 +1,7 @@
 package com.codexgui.bridge;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.SessionId;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -22,17 +24,17 @@ public final class BridgeProtocolCodec {
         JsonObject envelope;
         try {
             var parsed = JsonParser.parseString(Objects.requireNonNullElse(json, ""));
-            if (!parsed.isJsonObject()) return rejected("malformed_json", "Bridge 消息必须是 JSON 对象", null);
+            if (!parsed.isJsonObject()) return rejected("malformed_json", UiMessages.message("Bridge 消息必须是 JSON 对象"), null);
             envelope = parsed.getAsJsonObject();
         } catch (RuntimeException error) {
-            return rejected("malformed_json", "Bridge 消息不是有效 JSON", null);
+            return rejected("malformed_json", UiMessages.message("Bridge 消息不是有效 JSON"), null);
         }
 
         // 旧协议只能从此入口适配，进入业务分发前统一转换为 v1 command。
         if (!envelope.has("v")) {
             var adapted = legacyAdapter.adapt(envelope);
             return adapted == null
-                ? rejected("missing_version", "Bridge 消息缺少协议版本", envelope)
+                ? rejected("missing_version", UiMessages.message("Bridge 消息缺少协议版本"), envelope)
                 : new Decoded(adapted);
         }
         return decodeV1(envelope);
@@ -52,22 +54,22 @@ public final class BridgeProtocolCodec {
 
     private DecodeResult decodeV1(JsonObject envelope) {
         if (!number(envelope, "v") || integer(envelope, "v", -1) != VERSION) {
-            return rejected("unsupported_version", "不支持的 Bridge 协议版本", envelope);
+            return rejected("unsupported_version", UiMessages.message("不支持的 Bridge 协议版本"), envelope);
         }
         if (!stringField(envelope, "type") || !stringField(envelope, "requestId")
             || !stringField(envelope, "sessionId") || !stringFieldAllowEmpty(envelope, "turnId")
             || !wholeNumber(envelope, "generation") || !objectField(envelope, "payload")) {
-            return rejected("missing_identity", "Bridge envelope 缺少有效身份字段或 payload", envelope);
+            return rejected("missing_identity", UiMessages.message("Bridge envelope 缺少有效身份字段或 payload"), envelope);
         }
 
         var type = BridgeCommand.Type.fromWireName(envelope.get("type").getAsString());
-        if (type == null) return rejected("unknown_type", "未知 Bridge command 类型", envelope);
+        if (type == null) return rejected("unknown_type", UiMessages.message("未知 Bridge command 类型"), envelope);
         var payload = envelope.getAsJsonObject("payload");
         if ((type == BridgeCommand.Type.SEND || type == BridgeCommand.Type.STEER) && !validSendPayload(payload)) {
-            return rejected("invalid_payload", type.wireName() + " payload 必须包含 text 和 referenceIds", envelope);
+            return rejected("invalid_payload", type.wireName() + UiMessages.message(" payload 必须包含 text 和 referenceIds"), envelope);
         }
         var generation = envelope.get("generation").getAsLong();
-        if (generation < 0) return rejected("missing_identity", "Bridge generation 不能为负数", envelope);
+        if (generation < 0) return rejected("missing_identity", UiMessages.message("Bridge generation 不能为负数"), envelope);
         return new Decoded(new BridgeCommand.V1(
             type,
             envelope.get("requestId").getAsString(),

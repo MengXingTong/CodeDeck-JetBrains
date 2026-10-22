@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.bridge.BridgeCommand;
 import com.codexgui.bridge.BridgeProtocolCodec;
 import com.codexgui.conversation.ApprovalCoordinator;
@@ -248,7 +250,7 @@ final class CodexToolWindowController implements Disposable {
 
                 @Override
                 public void sendReviewPrompt() {
-                    sendInput("请审查当前工作区中尚未提交的修改，并优先报告具体问题和风险。");
+                    sendInput(UiMessages.message("请审查当前工作区中尚未提交的修改，并优先报告具体问题和风险。"));
                 }
 
                 @Override
@@ -317,7 +319,7 @@ final class CodexToolWindowController implements Disposable {
             providerSettings.loadModels();
             conversations.loadHistory("");
         }).exceptionally(error -> {
-            asyncError("连接 Codex CLI 失败", error);
+            asyncError(UiMessages.message("连接 Codex CLI 失败"), error);
             return null;
         });
     }
@@ -337,13 +339,13 @@ final class CodexToolWindowController implements Disposable {
                 case SEND, STEER, STOP, RENAME, COMPACT, REVIEW, REWIND -> true;
                 default -> false;
             }) {
-                toast("该会话正被其他客户端占用，当前仅查看历史；请在原客户端释放会话后重新打开");
+                toast(UiMessages.message("该会话正被其他客户端占用，当前仅查看历史；请在原客户端释放会话后重新打开"));
                 return;
             }
             switch (command.type()) {
                 case READY -> bootstrap();
                 case RECONNECT -> codex.restart().thenRun(providerSettings::loadModels).exceptionally(error -> {
-                    asyncError("重新连接 Codex CLI 失败", error);
+                    asyncError(UiMessages.message("重新连接 Codex CLI 失败"), error);
                     return null;
                 });
                 case SEND -> conversations.sendInput(
@@ -456,6 +458,7 @@ final class CodexToolWindowController implements Disposable {
         var settings = CodexSettingsState.getInstance().getState();
         var instructions = providerSettings.sharedInstructions(settings);
         var state = new JsonObject();
+        state.addProperty("uiLocale", UiMessages.languageTag());
         state.addProperty("connected", codex.isConnected());
         state.addProperty("sessionId", session.id().value());
         state.addProperty("busy", session.busy());
@@ -514,7 +517,7 @@ final class CodexToolWindowController implements Disposable {
             case "/mcp" -> codexFeatures.showMcpServers();
             case "/usage" -> codexFeatures.showUsage();
             case "/help" -> conversations.addNotice(
-                "Codex 原生命令",
+                UiMessages.message("Codex 原生命令"),
                 "/new · /compact · /review · /rewind · /mcp · /usage"
             );
             default -> {
@@ -580,13 +583,13 @@ final class CodexToolWindowController implements Disposable {
             // 先刷新本地文件，再按用户可见的行列位置打开编辑器。
             var file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
             if (file == null) {
-                toast("无法打开文件：" + rawPath);
+                toast(UiMessages.message("无法打开文件：") + rawPath);
                 return;
             }
             new OpenFileDescriptor(project, file, line - 1, column - 1).navigate(true);
         } catch (RuntimeException error) {
             // 路径格式无效时给出提示，避免点击链接导致界面线程异常。
-            toast("无法打开文件：" + rawPath);
+            toast(UiMessages.message("无法打开文件：") + rawPath);
         }
     }
 
@@ -606,10 +609,10 @@ final class CodexToolWindowController implements Disposable {
                 RevealFileAction.openDirectory(parent);
                 return;
             }
-            toast("无法打开文件所在目录：" + rawPath);
+            toast(UiMessages.message("无法打开文件所在目录：") + rawPath);
         } catch (RuntimeException error) {
             // 路径格式无效时保持与编辑器跳转一致的可见反馈。
-            toast("无法打开文件所在目录：" + rawPath);
+            toast(UiMessages.message("无法打开文件所在目录：") + rawPath);
         }
     }
 
@@ -657,11 +660,11 @@ final class CodexToolWindowController implements Disposable {
     }
 
     private void searchConversation() {
-        var query = Messages.showInputDialog(project, "输入要在当前会话中查找的文字：", "搜索会话", Messages.getQuestionIcon());
+        var query = Messages.showInputDialog(project, UiMessages.message("输入要在当前会话中查找的文字："), UiMessages.message("搜索会话"), Messages.getQuestionIcon());
         if (query == null || query.isBlank()) return;
         var count = activeSession().transcript().stream()
             .filter(entry -> entry.body().toLowerCase().contains(query.toLowerCase())).count();
-        toast("找到 " + count + " 条匹配消息");
+        toast(UiMessages.message("找到 ") + count + UiMessages.message(" 条匹配消息"));
     }
 
     private EditorFileContext currentEditorContext() {

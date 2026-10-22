@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.util.ArrayList;
@@ -20,7 +22,7 @@ public record AiResponse(String summary, List<Annotation> annotations) {
             JsonObject root = JsonParser.parseString(json).getAsJsonObject();
             String summary = string(root, "summary", 12_000);
             var values = root.getAsJsonArray("annotations");
-            if (values == null || values.size() > 200) throw new IllegalArgumentException("注释数量无效");
+            if (values == null || values.size() > 200) throw new IllegalArgumentException(UiMessages.message("注释数量无效"));
             var result = new ArrayList<Annotation>();
             var changes = snapshot.changes();
             for (var value : values) {
@@ -28,23 +30,23 @@ public record AiResponse(String summary, List<Annotation> annotations) {
                 int start = integer(block, "startLine"), end = integer(block, "endLine");
                 if ((!side.equals("before") && !side.equals("after")) || start < 1 || end < start
                         || end > snapshot.lineCount(side) || changes.stream().noneMatch(c -> c.intersects(side, start, end)))
-                    throw new IllegalArgumentException("注释行范围与当前 Diff 不一致");
+                    throw new IllegalArgumentException(UiMessages.message("注释行范围与当前 Diff 不一致"));
                 String title = string(block, "title", 300), explanation = string(block, "explanation", 12_000);
-                if (title.isBlank() || explanation.isBlank()) throw new IllegalArgumentException("注释内容为空");
+                if (title.isBlank() || explanation.isBlank()) throw new IllegalArgumentException(UiMessages.message("注释内容为空"));
                 result.add(new Annotation(side, start, end, title, explanation));
             }
-            if (result.isEmpty() && !changes.isEmpty()) throw new IllegalArgumentException("AI 没有返回变更注释");
+            if (result.isEmpty() && !changes.isEmpty()) throw new IllegalArgumentException(UiMessages.message("AI 没有返回变更注释"));
             for (var change : changes) {
                 boolean oldCovered = change.beforeStart() < change.beforeEnd()
                         && covered(result, "before", change.beforeStart(), change.beforeEnd());
                 boolean newCovered = change.afterStart() < change.afterEnd()
                         && covered(result, "after", change.afterStart(), change.afterEnd());
                 if (change.afterStart() < change.afterEnd() ? !newCovered : !oldCovered)
-                    throw new IllegalArgumentException("AI 未完整覆盖所有变更块");
+                    throw new IllegalArgumentException(UiMessages.message("AI 未完整覆盖所有变更块"));
             }
             return new AiResponse(summary, List.copyOf(result));
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("AI 结果无效：" + e.getMessage() + "；未自动重试", e);
+            throw new IllegalArgumentException(UiMessages.message("AI 结果无效：") + e.getMessage() + UiMessages.message("；未自动重试"), e);
         }
     }
     private static boolean covered(List<Annotation> annotations, String side, int start, int end) {
@@ -64,9 +66,9 @@ public record AiResponse(String summary, List<Annotation> annotations) {
     private static String string(JsonObject object, String key, int maximum) {
         var value = object.get(key);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
-            throw new IllegalArgumentException("缺少 " + key);
+            throw new IllegalArgumentException(UiMessages.message("缺少 ") + key);
         String text = value.getAsString();
-        if (text.length() > maximum) throw new IllegalArgumentException(key + " 过长");
+        if (text.length() > maximum) throw new IllegalArgumentException(key + UiMessages.message(" 过长"));
         return text;
     }
 }

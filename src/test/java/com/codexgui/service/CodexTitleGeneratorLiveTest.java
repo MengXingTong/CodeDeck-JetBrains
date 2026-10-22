@@ -33,7 +33,7 @@ final class CodexTitleGeneratorLiveTest {
                 }
             }, ignored -> {})) {
             processRef.set(rpc);
-            var client = new JsonObject(); client.addProperty("name", "codedeck-title-smoke"); client.addProperty("version", "2.1.0");
+            var client = new JsonObject(); client.addProperty("name", "codedeck-title-smoke"); client.addProperty("version", "2.1.1");
             var init = new JsonObject(); init.add("clientInfo", client);
             var caps = new JsonObject(); caps.addProperty("experimentalApi", true); init.add("capabilities", caps);
             rpc.request("initialize", init).get(25, TimeUnit.SECONDS); rpc.notify("initialized", null);

@@ -4,8 +4,11 @@
     <vendor>CodeDeck</vendor>
 
     <description><![CDATA[
+      A native Codex / Claude Code CLI interface for JetBrains IDEs, with change lists,
+      native diffs, and AI annotations. English and Simplified Chinese interfaces follow the IDE language.
+      <br>
       面向 JetBrains IDE 的 Codex / Claude Code 图形界面。连接 Codex app-server 与
-      Claude Code CLI，不注入第三方隐藏提示词。
+      Claude Code CLI，不注入第三方隐藏提示词。支持跟随 IDE 语言的简体中文与英文界面。
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>

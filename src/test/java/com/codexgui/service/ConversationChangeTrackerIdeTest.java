@@ -31,6 +31,35 @@ import static org.junit.jupiter.api.Assertions.*;
 class ConversationChangeTrackerIdeTest {
     @TempDir Path root;
 
+    @Test void p4ReadOnlyRevertCanBeUndoneWithAnOpenEditor() throws Exception {
+        onEdt(() -> {
+            var path = root.resolve("p4-file.cpp");
+            var original = "before\r\n".getBytes(StandardCharsets.UTF_8);
+            Files.write(path, original);
+            var file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
+            var manager = FileDocumentManager.getInstance();
+            var document = manager.getDocument(file);
+            var tracker = new ConversationChangeTracker(project());
+            try {
+                tracker.commandStarted("session", "p4", "p4 revert p4-file.cpp", root.toString());
+                WriteAction.run(() -> {
+                    file.setBinaryContent("repository\n".getBytes(StandardCharsets.UTF_8));
+                    file.setWritable(false);
+                });
+                manager.reloadFromDisk(document);
+                tracker.commandCompleted("session", "p4");
+                assertFalse(file.isWritable());
+                assertEquals("repository\n", Files.readString(path));
+                tracker.revertAll("session");
+                assertRestored(path, original);
+                assertTrue(file.isWritable());
+            } finally {
+                WriteAction.run(() -> file.setWritable(true));
+                tracker.dispose();
+            }
+        });
+    }
+
     @Test void singleAndAllFileRevertsRestoreCrlfBytesAndRefreshOpenDocuments() throws Exception {
         onEdt(() -> {
             var tracker = new ConversationChangeTracker(project());

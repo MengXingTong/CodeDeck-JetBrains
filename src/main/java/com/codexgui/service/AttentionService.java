@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.settings.CodexSettingsState;
 import com.intellij.notification.NotificationGroupManager;
 import com.intellij.notification.NotificationType;
@@ -19,7 +21,7 @@ public final class AttentionService implements AutoCloseable {
 
     public CompletableFuture<Void> playConfigured(CodexSettingsState.StateData settings) {
         if (Objects.equals(settings.notificationSound, "custom") && settings.customSoundPath.isBlank()) {
-            return CompletableFuture.failedFuture(new IllegalStateException("请先选择自定义音频文件"));
+            return CompletableFuture.failedFuture(new IllegalStateException(UiMessages.message("请先选择自定义音频文件")));
         }
         return soundPlayer.play(settings.notificationSound, settings.customSoundPath);
     }

@@ -1,5 +1,7 @@
 package com.codexgui.provider;
 
+import com.codexgui.i18n.Messages;
+
 import com.google.gson.JsonObject;
 
 /** An upstream error may describe an automatic retry rather than a finished turn. */
@@ -13,7 +15,7 @@ public record CodexError(String message, boolean willRetry) {
             ? params.getAsJsonObject("error") : params;
         var message = text(error, "message");
         if (message.isBlank()) message = text(params, "message");
-        if (message.isBlank()) message = retry ? "Codex 正在重试连接" : "Codex 请求失败";
+        if (message.isBlank()) message = retry ? Messages.message("Codex 正在重试连接") : Messages.message("Codex 请求失败");
         var details = text(error, "additionalDetails");
         if (details.isBlank()) details = text(params, "additionalDetails");
         if (!details.isBlank() && !message.contains(details)) message += "\n" + details;

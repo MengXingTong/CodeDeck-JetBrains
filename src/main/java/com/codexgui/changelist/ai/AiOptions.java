@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.settings.CodexSettingsState;
 
 /** Empty model/effort values deliberately leave the official CLI configuration in control. */
@@ -8,7 +10,7 @@ public record AiOptions(String executable, String model, String effort, boolean 
     public AiOptions(String executable, String model, String effort, boolean fast) {
         this(executable, model, effort, fast, new CodexSettingsState.ProviderProfileSnapshot(
                 CodexSettingsState.CODEX_LOCAL_PROVIDER_ID, CodexSettingsState.ProviderChannel.CODEX,
-                "本机 Codex", "", "", "responses", true, 1));
+                UiMessages.message("本机 Codex"), "", "", "responses", true, 1));
     }
     public AiOptions {
         executable = clean(executable); model = clean(model); effort = clean(effort);
@@ -28,7 +30,7 @@ public record AiOptions(String executable, String model, String effort, boolean 
         }
     }
     public String cacheKey(AiDiffSnapshot snapshot) {
-        return snapshot.fingerprint() + ":codedeck-v1:" + executable + ":" + model + ":" + effort + ":" + fast
+        return snapshot.fingerprint() + ":codedeck-v1:" + UiMessages.languageTag() + ":" + executable + ":" + model + ":" + effort + ":" + fast
                 + ":" + provider.id() + ":" + provider.revision() + ":" + provider.baseUrl() + ":" + provider.wireApi();
     }
 }

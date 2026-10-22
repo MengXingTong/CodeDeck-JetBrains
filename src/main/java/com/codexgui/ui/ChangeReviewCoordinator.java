@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.service.ConversationChangeTracker;
 import com.intellij.diff.DiffContentFactory;
 import com.intellij.diff.editor.DiffEditorTabFilesManager;
@@ -54,24 +56,24 @@ final class ChangeReviewCoordinator implements Disposable {
         var change = changeAt(sessionId, index);
         if (change == null) return;
         // 单文件撤销需要用户确认，避免误删本次会话建立基线后的手动编辑。
-        if (Messages.showYesNoDialog(project, "撤销 Codex 对该文件的全部修改？\n\n" + change.path(), "撤销文件修改", "撤销", "取消", Messages.getWarningIcon()) != Messages.YES) return;
+        if (Messages.showYesNoDialog(project, UiMessages.message("撤销 Codex 对该文件的全部修改？\n\n") + change.path(), UiMessages.message("撤销文件修改"), UiMessages.message("撤销"), UiMessages.message("取消"), Messages.getWarningIcon()) != Messages.YES) return;
         try {
             changeService.revert(sessionId, change.path());
             closeDiff(sessionId, change.path());
         } catch (IOException error) {
-            Messages.showErrorDialog(project, error.getMessage(), "无法撤销修改");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("无法撤销修改"));
         }
     }
 
     void revertAll(String sessionId) {
         if (changeService.listSummaries(sessionId).isEmpty()) return;
         // 全量撤销同样保留显式确认，失败时由 ChangeTracker 汇总未恢复的文件。
-        if (Messages.showYesNoDialog(project, "撤销当前回合捕获的全部文件修改？", "撤销全部修改", "全部撤销", "取消", Messages.getWarningIcon()) != Messages.YES) return;
+        if (Messages.showYesNoDialog(project, UiMessages.message("撤销当前回合捕获的全部文件修改？"), UiMessages.message("撤销全部修改"), UiMessages.message("全部撤销"), UiMessages.message("取消"), Messages.getWarningIcon()) != Messages.YES) return;
         try {
             changeService.revertAll(sessionId);
             closeSession(sessionId);
         } catch (IOException error) {
-            Messages.showErrorDialog(project, error.getMessage(), "部分文件无法撤销");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("部分文件无法撤销"));
         }
     }
 
@@ -100,11 +102,11 @@ final class ChangeReviewCoordinator implements Disposable {
             ? factory.create(project, details.afterContent() == null ? "" : new String(details.afterContent(), StandardCharsets.UTF_8))
             : factory.create(project, sourceDocument, sourceFile);
         var request = new SimpleDiffRequest(
-            (Objects.equals(provider, "claude") ? "Claude Code 修改 · " : "Codex 修改 · ") + change.path().getFileName(),
+            (Objects.equals(provider, "claude") ? UiMessages.message("Claude Code 修改 · ") : UiMessages.message("Codex 修改 · ")) + change.path().getFileName(),
             beforeContent,
             afterContent,
-            "AI 修改前（只读）",
-            "当前文件（可编辑）"
+            UiMessages.message("AI 修改前（只读）"),
+            UiMessages.message("当前文件（可编辑）")
         );
         // 只读保护 AI 修改前快照，允许右侧真实文件文档接收编辑。
         request.putUserData(DiffUserDataKeys.FORCE_READ_ONLY_CONTENTS, new boolean[]{true, false});
@@ -121,7 +123,7 @@ final class ChangeReviewCoordinator implements Disposable {
         var fileExists = Files.exists(change.path());
         var target = fileExists ? change.path() : change.path().getParent();
         if (target == null || !Files.exists(target)) {
-            toast.accept("无法打开文件所在目录");
+            toast.accept(UiMessages.message("无法打开文件所在目录"));
             return;
         }
         // 现存文件交给系统文件管理器选中，删除记录则直接打开原父目录。

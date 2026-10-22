@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.Disposable;
@@ -51,7 +53,7 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
         this.project = project;
         live = new PerforceLiveChanges(project, this, changes -> {
             liveUpdates.update(changes);
-            status = "已自动检测本地变更";
+            status = UiMessages.message("已自动检测本地变更");
             if (!disposed && !project.isDisposed()) project.getMessageBus().syncPublisher(CHANGED)
                     .pathsChanged(changes.stream().map(LiveChangesOverlay.Update::path).toList());
         }, message -> { status = message; publish(); });
@@ -83,8 +85,8 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
         if (!force && lastAttempt != 0 && now - lastAttempt < TimeUnit.SECONDS.toNanos(60)) return;
         lastAttempt = now; running = true;
         long startedVersion = liveUpdates.version();
-        status = "正在扫描 P4 本地变更…"; publish();
-        new Task.Backgroundable(project, "扫描 Perforce 本地变更（只读）", true) {
+        status = UiMessages.message("正在扫描 P4 本地变更…"); publish();
+        new Task.Backgroundable(project, UiMessages.message("扫描 Perforce 本地变更（只读）"), true) {
             private List<Entry> result;
             private boolean applicable;
             @Override public void run(@NotNull ProgressIndicator indicator) {
@@ -96,16 +98,16 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
                 if (roots.isEmpty()) { result = List.of(); return; }
                 applicable = true;
                 var settings = PerforceSettings.getSettings(project);
-                if (!settings.ENABLED) throw new IllegalStateException("Perforce 当前处于离线状态");
+                if (!settings.ENABLED) throw new IllegalStateException(UiMessages.message("Perforce 当前处于离线状态"));
                 var connections = PerforceConnectionManager.getInstance(project);
-                if (!connections.isInitialized()) throw new IllegalStateException("Perforce 连接尚未就绪，请稍后刷新");
+                if (!connections.isInitialized()) throw new IllegalStateException(UiMessages.message("Perforce 连接尚未就绪，请稍后刷新"));
                 var runner = PerforceRunner.getInstance(project);
                 List<Entry> found = new ArrayList<>();
                 Set<Path> scanned = new HashSet<>();
                 for (Path root : roots) {
                     checkScanning(indicator);
                     var connection = connections.getConnectionForFile(root.toFile());
-                    if (connection == null) throw new IllegalStateException("IDE 未配置此目录的 Perforce 连接：" + root);
+                    if (connection == null) throw new IllegalStateException(UiMessages.message("IDE 未配置此目录的 Perforce 连接：") + root);
                     try {
                         var files = PerforcePreview.syncedFiles(execute(settings, runner, connection,
                                 PerforcePreview.haveCommand(root)), scope, indicator::checkCanceled);
@@ -136,13 +138,13 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
             @Override public void onSuccess() {
                 if (!enabled() || result == null) return;
                 entries = result; liveUpdates.acknowledgeAll(startedVersion);
-                status = applicable ? "P4 本地变更扫描 " + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-                        + " · " + entries.size() + " 个文件（过滤前）" : "";
+                status = applicable ? UiMessages.message("P4 本地变更扫描 ") + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
+                        + " · " + entries.size() + UiMessages.message(" 个文件（过滤前）") : "";
             }
             @Override public void onThrowable(@NotNull Throwable error) {
-                status = "P4 扫描失败（保留上次结果）：" + error.getMessage();
+                status = UiMessages.message("P4 扫描失败（保留上次结果）：") + error.getMessage();
             }
-            @Override public void onCancel() { status = "P4 扫描已取消（保留上次结果）"; }
+            @Override public void onCancel() { status = UiMessages.message("P4 扫描已取消（保留上次结果）"); }
             @Override public void onFinished() {
                 running = false; fullIndicator = null; lastAttempt = System.nanoTime();
                 if (disposed || project.isDisposed()) return;
@@ -195,7 +197,7 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
         for (Entry previous : entries) if (!scanned.contains(previous.path())) merged.put(previous.path(), previous);
         for (Entry entry : found) merged.put(entry.path(), entry);
         List<Entry> partial = List.copyOf(merged.values());
-        String progress = "P4 本地变更扫描 · 已检查 " + scanned.size() + " 个文件 · 当前目录 " + rootScanned + " / " + rootTotal;
+        String progress = UiMessages.message("P4 本地变更扫描 · 已检查 ") + scanned.size() + UiMessages.message(" 个文件 · 当前目录 ") + rootScanned + " / " + rootTotal;
         ApplicationManager.getApplication().invokeLater(() -> {
             if (disposed || project.isDisposed() || indicator.isCanceled()
                     || !project.getService(SidebarSettings.class).snapshot().scanUnopened) return;
@@ -224,7 +226,7 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
             var current = virtual == null ? null : ChangeListManager.getInstance(project).getChange(virtual);
             if (current != null) return current;
             if (!entry.deleted() && (virtual == null || !virtual.isValid())) {
-                throw new IOException("文件已不存在，请刷新变更列表");
+                throw new IOException(UiMessages.message("文件已不存在，请刷新变更列表"));
             }
             // workRev is the synced have revision, even when the server HEAD has moved ahead.
             var before = new PreviewRevision(project, connection, entry.depotPath(), path, entry.revision());

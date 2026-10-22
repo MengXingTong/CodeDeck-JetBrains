@@ -1,5 +1,7 @@
 package com.codexgui.settings;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.ui.components.JBCheckBox;
@@ -31,25 +33,25 @@ public final class CodexSettingsConfigurable implements Configurable {
         var state = CodexSettingsState.getInstance().getState();
         executableField = new JBTextField(state.codexExecutable);
         claudeExecutableField = new JBTextField(state.claudeExecutable);
-        effortCombo = new ComboBox<>(new Choice[]{new Choice("minimal", "最少"), new Choice("low", "低"), new Choice("medium", "中"), new Choice("high", "高"), new Choice("xhigh", "极高"), new Choice("ultra", "最高")});
+        effortCombo = new ComboBox<>(new Choice[]{new Choice("minimal", UiMessages.message("最少")), new Choice("low", UiMessages.message("低")), new Choice("medium", UiMessages.message("中")), new Choice("high", UiMessages.message("高")), new Choice("xhigh", UiMessages.message("极高")), new Choice("ultra", UiMessages.message("最高"))});
         select(effortCombo, state.reasoningEffort);
-        serviceTierCombo = new ComboBox<>(new Choice[]{new Choice("standard", "标准"), new Choice("fast", "Fast")});
+        serviceTierCombo = new ComboBox<>(new Choice[]{new Choice("standard", UiMessages.message("标准")), new Choice("fast", "Fast")});
         select(serviceTierCombo, state.serviceTier);
-        approvalCombo = new ComboBox<>(new Choice[]{new Choice("untrusted", "谨慎审批"), new Choice("on-request", "按需审批"), new Choice("never", "全自动")});
+        approvalCombo = new ComboBox<>(new Choice[]{new Choice("untrusted", UiMessages.message("谨慎审批")), new Choice("on-request", UiMessages.message("按需审批")), new Choice("never", UiMessages.message("全自动"))});
         select(approvalCombo, state.approvalPolicy);
-        sandboxCombo = new ComboBox<>(new Choice[]{new Choice("read-only", "只读"), new Choice("workspace-write", "标准"), new Choice("danger-full-access", "完全访问")});
+        sandboxCombo = new ComboBox<>(new Choice[]{new Choice("read-only", UiMessages.message("只读")), new Choice("workspace-write", UiMessages.message("标准")), new Choice("danger-full-access", UiMessages.message("完全访问"))});
         select(sandboxCombo, state.sandboxMode);
-        streamingCheckBox = new JBCheckBox("流式显示 Codex 输出", state.streamResponses);
+        streamingCheckBox = new JBCheckBox(UiMessages.message("流式显示 Codex 输出"), state.streamResponses);
 
         return FormBuilder.createFormBuilder()
-            .addLabeledComponent(new JBLabel("Codex 可执行文件："), executableField)
-            .addTooltip("可以填写 codex、codex.cmd 或 Codex CLI 的绝对路径")
-            .addLabeledComponent(new JBLabel("Claude Code 可执行文件："), claudeExecutableField)
-            .addTooltip("可以填写 claude、claude.cmd 或 Claude Code CLI 的绝对路径")
-            .addLabeledComponent(new JBLabel("默认推理强度："), effortCombo)
-            .addLabeledComponent(new JBLabel("响应模式："), serviceTierCombo)
-            .addLabeledComponent(new JBLabel("默认审批策略："), approvalCombo)
-            .addLabeledComponent(new JBLabel("默认沙箱："), sandboxCombo)
+            .addLabeledComponent(new JBLabel(UiMessages.message("Codex 可执行文件：")), executableField)
+            .addTooltip(UiMessages.message("可以填写 codex、codex.cmd 或 Codex CLI 的绝对路径"))
+            .addLabeledComponent(new JBLabel(UiMessages.message("Claude Code 可执行文件：")), claudeExecutableField)
+            .addTooltip(UiMessages.message("可以填写 claude、claude.cmd 或 Claude Code CLI 的绝对路径"))
+            .addLabeledComponent(new JBLabel(UiMessages.message("默认推理强度：")), effortCombo)
+            .addLabeledComponent(new JBLabel(UiMessages.message("响应模式：")), serviceTierCombo)
+            .addLabeledComponent(new JBLabel(UiMessages.message("默认审批策略：")), approvalCombo)
+            .addLabeledComponent(new JBLabel(UiMessages.message("默认沙箱：")), sandboxCombo)
             .addComponent(streamingCheckBox)
             .addComponentFillVertically(new JPanel(), 0)
             .getPanel();

@@ -113,7 +113,8 @@ final class ConversationCoordinatorTest {
             var coordinator = new ConversationCoordinator(null, null, codex, null, null, null,
                 tracker, null, registry, sessions, null, null, null, null, presenter, null);
             var started = new TurnEvent.Item(handle, TurnEvent.Item.Phase.STARTED, "cmd", "commandExecution",
-                Map.of("command", "Remove-Item deleted.cpp", "cwd", root.toString()));
+                Map.of("command", "opaque shell wrapper", "cwd", root.toString(),
+                    "commandActions", List.of(Map.of("type", "unknown", "command", "Remove-Item deleted.cpp"))));
             coordinator.captureCodexCommand(started);
             Files.delete(path);
             tracker.commandCompleted(background.id().value(), "cmd");

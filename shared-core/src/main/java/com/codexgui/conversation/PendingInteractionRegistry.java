@@ -1,5 +1,7 @@
 package com.codexgui.conversation;
 
+import com.codexgui.i18n.Messages;
+
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -15,7 +17,7 @@ public final class PendingInteractionRegistry {
         Instant deadline
     ) {
         public PendingInteraction {
-            if (requestId == null || requestId.isBlank()) throw new IllegalArgumentException("requestId 不能为空");
+            if (requestId == null || requestId.isBlank()) throw new IllegalArgumentException(Messages.message("requestId 不能为空"));
             Objects.requireNonNull(turnHandle, "turnHandle");
             Objects.requireNonNull(type, "type");
             Objects.requireNonNull(deadline, "deadline");

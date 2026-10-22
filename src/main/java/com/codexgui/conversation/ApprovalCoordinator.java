@@ -1,5 +1,7 @@
 package com.codexgui.conversation;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.service.CodexAppServerService;
 import com.codexgui.settings.CodexSettingsState;
 import com.google.gson.JsonArray;
@@ -53,15 +55,15 @@ public final class ApprovalCoordinator {
         switch (type) {
             case COMMAND_APPROVAL -> showDecisionDialog(
                 requestId,
-                "Codex 请求执行：\n\n" + string(params, "command", "未知命令"),
-                "命令执行审批",
-                new String[]{"允许一次", "本会话允许", "拒绝", "拒绝并停止"}
+                UiMessages.message("Codex 请求执行：\n\n") + string(params, "command", UiMessages.message("未知命令")),
+                UiMessages.message("命令执行审批"),
+                new String[]{UiMessages.message("允许一次"), UiMessages.message("本会话允许"), UiMessages.message("拒绝"), UiMessages.message("拒绝并停止")}
             );
             case FILE_APPROVAL -> showDecisionDialog(
                 requestId,
-                string(params, "reason", "Codex 请求修改工作区文件"),
-                "文件修改审批",
-                new String[]{"允许一次", "本会话允许", "拒绝", "拒绝并停止"}
+                string(params, "reason", UiMessages.message("Codex 请求修改工作区文件")),
+                UiMessages.message("文件修改审批"),
+                new String[]{UiMessages.message("允许一次"), UiMessages.message("本会话允许"), UiMessages.message("拒绝"), UiMessages.message("拒绝并停止")}
             );
             case USER_INPUT -> publishQuestions(requestId, params, questionSink);
             case PERMISSIONS_APPROVAL -> showPermissionsDialog(requestId, params);
@@ -146,9 +148,9 @@ public final class ApprovalCoordinator {
 
     private void showPermissionsDialog(long requestId, JsonObject params) {
         CompletableFuture.supplyAsync(() -> showTimedDialog(
-            string(params, "reason", "Codex 请求临时提升权限"),
-            "权限审批",
-            new String[]{"允许", "拒绝"}
+            string(params, "reason", UiMessages.message("Codex 请求临时提升权限")),
+            UiMessages.message("权限审批"),
+            new String[]{UiMessages.message("允许"), UiMessages.message("拒绝")}
         ), AppExecutorUtil.getAppExecutorService()).thenAccept(choice -> ApplicationManager.getApplication().invokeLater(() -> {
             var interaction = pending.take(Long.toString(requestId));
             if (interaction == null) return;

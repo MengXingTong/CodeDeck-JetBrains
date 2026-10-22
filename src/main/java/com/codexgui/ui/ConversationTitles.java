@@ -52,7 +52,7 @@ final class ConversationTitles {
         var originalTitle = session.title();
         if (sessions.find(session.id()) != session || !Objects.equals(session.provider(), "codex") || session.threadId() == null || session.threadId().isBlank()
             || named.contains(session.id()) || pending.containsKey(session.id())
-            || (!previews.contains(session.id()) && !originalTitle.matches("新会话(?: \\d+)?"))) return;
+            || (!previews.contains(session.id()) && !originalTitle.matches("(?:新会话|New chat)(?: \\d+)?"))) return;
         var user = session.transcript().stream().filter(entry -> entry.kind() == ConversationEntry.Kind.USER)
             .map(ConversationEntry::body).findFirst().orElse("");
         var assistant = session.transcript().stream().filter(entry -> entry.kind() == ConversationEntry.Kind.ASSISTANT)

@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import javazoom.jl.player.Player;
 
 import javax.sound.sampled.AudioFormat;
@@ -33,7 +35,7 @@ public final class NotificationSoundPlayer implements AutoCloseable {
                     playBuiltIn(BUILT_IN_SOUND_IDS.contains(soundId) ? soundId : "default");
                 }
             } catch (Exception error) {
-                throw new RuntimeException("无法播放提示音", error);
+                throw new RuntimeException(UiMessages.message("无法播放提示音"), error);
             }
         });
     }
@@ -74,7 +76,7 @@ public final class NotificationSoundPlayer implements AutoCloseable {
     }
 
     private void playCustom(Path path) throws Exception {
-        if (!Files.isRegularFile(path)) throw new IOException("音频文件不存在：" + path);
+        if (!Files.isRegularFile(path)) throw new IOException(UiMessages.message("音频文件不存在：") + path);
         var fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
         if (fileName.endsWith(".mp3")) {
             try (var input = new BufferedInputStream(Files.newInputStream(path))) {

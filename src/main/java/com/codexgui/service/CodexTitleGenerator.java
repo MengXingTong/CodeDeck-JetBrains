@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.provider.CodexError;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -46,7 +48,7 @@ public final class CodexTitleGenerator implements CodexEventListener, AutoClosea
             .thenCompose(config -> request.apply("thread/start", threadParams(model, config)))
             .thenCompose(response -> {
                 var threadId = text(response.getAsJsonObject("thread"), "id");
-                if (threadId.isBlank()) return CompletableFuture.failedFuture(new IllegalStateException("标题请求缺少会话 ID"));
+                if (threadId.isBlank()) return CompletableFuture.failedFuture(new IllegalStateException(UiMessages.message("标题请求缺少会话 ID")));
                 var task = new Task();
                 tasks.put(threadId, task);
                 task.result.orTimeout(90, TimeUnit.SECONDS).whenComplete((title, error) -> {
@@ -102,7 +104,7 @@ public final class CodexTitleGenerator implements CodexEventListener, AutoClosea
         conversation.addProperty("user", shorten(user, 4000));
         conversation.addProperty("assistant", shorten(assistant, 2000));
         var part = new JsonObject(); part.addProperty("type", "text");
-        part.addProperty("text", "为这段对话生成概括主要任务的简短标题，使用用户的语言。中文约 6–18 字，其他语言约 3–8 个词。不要照抄首句，不要加引号、标题前缀或句末标点。只返回符合 schema 的 JSON。\n" + conversation);
+        part.addProperty("text", UiMessages.message("为这段对话生成概括主要任务的简短标题，使用用户的语言。中文约 6–18 字，其他语言约 3–8 个词。不要照抄首句，不要加引号、标题前缀或句末标点。只返回符合 schema 的 JSON。\n") + conversation);
         part.add("text_elements", new JsonArray());
         var input = new JsonArray(); input.add(part);
         var params = new JsonObject(); params.addProperty("threadId", threadId); params.add("input", input);
@@ -127,17 +129,17 @@ public final class CodexTitleGenerator implements CodexEventListener, AutoClosea
                 var item = params.getAsJsonObject("item");
                 if (text(item, "type").equals("agentMessage")) task.messages.put(text(item, "id"), new StringBuilder(text(item, "text")));
             } else if (method.equals("error") && !(params.has("willRetry") && params.get("willRetry").getAsBoolean())) {
-                task.result.completeExceptionally(new IllegalStateException("标题生成失败：" + CodexError.from(params).message()));
+                task.result.completeExceptionally(new IllegalStateException(UiMessages.message("标题生成失败：") + CodexError.from(params).message()));
             } else if (method.equals("turn/completed")) {
                 var turn = params.getAsJsonObject("turn");
                 if (!text(turn, "status").equals("completed")) {
-                    task.result.completeExceptionally(new IllegalStateException("标题生成回合未完成：" + CodexError.from(turn).message()));
+                    task.result.completeExceptionally(new IllegalStateException(UiMessages.message("标题生成回合未完成：") + CodexError.from(turn).message()));
                     return;
                 }
                 try {
                     var answer = task.messages.values().stream().map(StringBuilder::toString).filter(value -> !value.isBlank()).reduce((first, last) -> last).orElse("");
                     var title = text(JsonParser.parseString(answer).getAsJsonObject(), "title").replaceAll("\\s+", " ").trim();
-                    if (title.isBlank() || title.codePointCount(0, title.length()) > 48) throw new IllegalStateException("标题生成结果无效");
+                    if (title.isBlank() || title.codePointCount(0, title.length()) > 48) throw new IllegalStateException(UiMessages.message("标题生成结果无效"));
                     task.result.complete(title);
                 } catch (RuntimeException error) { task.result.completeExceptionally(error); }
             }
@@ -145,7 +147,7 @@ public final class CodexTitleGenerator implements CodexEventListener, AutoClosea
     }
 
     @Override public void onConnectionChanged(boolean connected, String detail) {
-        if (!connected) tasks.values().forEach(task -> task.result.completeExceptionally(new IllegalStateException("Codex 连接已关闭")));
+        if (!connected) tasks.values().forEach(task -> task.result.completeExceptionally(new IllegalStateException(UiMessages.message("Codex 连接已关闭"))));
     }
 
     private void cleanup(BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request, String method, JsonObject params) {

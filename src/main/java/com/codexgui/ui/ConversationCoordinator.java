@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.ApprovalCoordinator;
 import com.codexgui.conversation.ConversationSession;
 import com.codexgui.conversation.SessionCoordinator;
@@ -126,7 +128,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         titles = new ConversationTitles(sessionRegistry, titleGenerator::generate, codex::setThreadName,
             action -> ApplicationManager.getApplication().invokeLater(action), presenter::threadTitle, () -> loadHistory(""),
             error -> com.intellij.openapi.diagnostic.Logger.getInstance(ConversationCoordinator.class)
-                .info("Codex 会话标题生成失败，保留现有名称", error));
+                .info(UiMessages.message("Codex 会话标题生成失败，保留现有名称"), error));
         codex.addListener(this);
     }
 
@@ -194,7 +196,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 });
             }).exceptionally(error -> {
                 ApplicationManager.getApplication().invokeLater(
-                    () -> asyncError(session, "无法读取 Claude 历史", error));
+                    () -> asyncError(session, UiMessages.message("无法读取 Claude 历史"), error));
                 return null;
             });
             return;
@@ -207,7 +209,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 var thread = element.getAsJsonObject();
                 var id = string(thread, "id", "");
                 var title = string(thread, "name", "");
-                if (title.isBlank()) title = string(thread, "preview", "未命名会话");
+                if (title.isBlank()) title = string(thread, "preview", UiMessages.message("未命名会话"));
                 var item = new JsonObject();
                 item.addProperty("id", id);
                 item.addProperty("title", title);
@@ -227,7 +229,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             });
         }).exceptionally(error -> {
             ApplicationManager.getApplication().invokeLater(
-                () -> asyncError(session, "无法读取 Codex 历史", error));
+                () -> asyncError(session, UiMessages.message("无法读取 Codex 历史"), error));
             return null;
         });
     }
@@ -247,12 +249,12 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             return;
         }
         if (session.busy()) {
-            presenter.toast(session, "当前页签有任务正在运行，请新建页签后打开其他历史会话");
+            presenter.toast(session, UiMessages.message("当前页签有任务正在运行，请新建页签后打开其他历史会话"));
             return;
         }
         var requestToken = new Object();
         if (openingHistory.putIfAbsent(session.id(), requestToken) != null) {
-            presenter.toast(session, "正在打开历史会话，请稍候");
+            presenter.toast(session, UiMessages.message("正在打开历史会话，请稍候"));
             return;
         }
         var generation = session.generation();
@@ -270,13 +272,13 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                     var kind = ConversationEntry.Kind.valueOf(historyEntry.kind().name());
                     var title = switch (kind) {
                         // 用户消息沿用聊天区的用户标签。
-                        case USER -> "你";
+                        case USER -> UiMessages.message("你");
                         // 助手消息明确标记为 Claude。
                         case ASSISTANT -> "Claude";
                         // 思考内容使用统一的推理标签。
-                        case REASONING -> "思考过程";
+                        case REASONING -> UiMessages.message("思考过程");
                         // 工具调用在历史中按命令条目展示。
-                        case COMMAND -> "工具调用";
+                        case COMMAND -> UiMessages.message("工具调用");
                         default -> "Claude";
                     };
                     addEntry(session, new ConversationEntry(
@@ -294,7 +296,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             })).exceptionally(error -> {
                 ApplicationManager.getApplication().invokeLater(() -> {
                     openingHistory.remove(session.id(), requestToken);
-                    if (canApplyHistory(session, provider, generation)) asyncError(session, "无法打开 Claude 历史会话", error);
+                    if (canApplyHistory(session, provider, generation)) asyncError(session, UiMessages.message("无法打开 Claude 历史会话"), error);
                 });
                 return null;
             });
@@ -307,7 +309,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         })).exceptionally(error -> {
             ApplicationManager.getApplication().invokeLater(() -> {
                 openingHistory.remove(session.id(), requestToken);
-                if (canApplyHistory(session, provider, generation)) asyncError(session, "无法打开历史会话", error);
+                if (canApplyHistory(session, provider, generation)) asyncError(session, UiMessages.message("无法打开历史会话"), error);
             });
             return null;
         });
@@ -327,7 +329,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         session.threadId(string(thread, "id", null));
         session.title(string(thread, "name", ""));
         titles.historyLoaded(session, !session.title().isBlank());
-        if (session.title().isBlank()) session.title(string(thread, "preview", "Codex 会话"));
+        if (session.title().isBlank()) session.title(string(thread, "preview", UiMessages.message("Codex 会话")));
         presenter.clear(session);
         for (var turnElement : array(thread, "turns")) {
             for (var itemElement : array(turnElement.getAsJsonObject(), "items")) {
@@ -352,10 +354,10 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         if (!skipConfirmation && settings.newSessionConfirmEnabled && !session.transcript().isEmpty()
             && Messages.showYesNoDialog(
                 project,
-                "当前会话已有消息，确定要新建会话吗？",
-                "新建会话",
-                "新建",
-                "取消",
+                UiMessages.message("当前会话已有消息，确定要新建会话吗？"),
+                UiMessages.message("新建会话"),
+                UiMessages.message("新建"),
+                UiMessages.message("取消"),
                 Messages.getQuestionIcon()
             ) != Messages.YES) return;
 
@@ -375,7 +377,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var activeProvider = settingsService.activeProvider(session.provider());
         session.providerProfileId(activeProvider.id);
         session.providerRevision(activeProvider.revision);
-        session.title(requestedTitle == null || requestedTitle.isBlank() ? "新会话" : requestedTitle.trim());
+        session.title(requestedTitle == null || requestedTitle.isBlank() ? UiMessages.message("新会话") : requestedTitle.trim());
         presenter.clear(session);
         presenter.attachments(session);
         presenter.fileReferences(session);
@@ -413,8 +415,8 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var session = activeSession();
         var name = Messages.showInputDialog(
             project,
-            "输入新的会话名称：",
-            "重命名会话",
+            UiMessages.message("输入新的会话名称："),
+            UiMessages.message("重命名会话"),
             Messages.getQuestionIcon(),
             session.title(),
             null
@@ -432,7 +434,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             loadHistory("");
         }).exceptionally(error -> {
             ApplicationManager.getApplication().invokeLater(
-                () -> asyncError(session, "无法重命名会话", error));
+                () -> asyncError(session, UiMessages.message("无法重命名会话"), error));
             return null;
         });
     }
@@ -441,7 +443,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var session = activeSession();
         if (session.transcript().isEmpty()) return;
         var chooser = new JFileChooser(changeService.getRoot().toFile());
-        chooser.setDialogTitle("导出 Codex 会话");
+        chooser.setDialogTitle(UiMessages.message("导出 Codex 会话"));
         chooser.setSelectedFile(new java.io.File("codex-conversation.md"));
         if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return;
         var markdown = new StringBuilder("# ").append(session.title()).append("\n\n");
@@ -450,9 +452,9 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             .append(entry.body()).append("\n\n"));
         try {
             Utf8IO.write(chooser.getSelectedFile().toPath(), markdown);
-            presenter.toast(session, "会话已导出");
+            presenter.toast(session, UiMessages.message("会话已导出"));
         } catch (IOException error) {
-            Messages.showErrorDialog(project, error.getMessage(), "导出失败");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("导出失败"));
         }
     }
 
@@ -479,13 +481,13 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var activeProvider = settingsService.activeProvider(session.provider());
         if (!Objects.equals(session.providerProfileId(), activeProvider.id)
             || session.providerRevision() != activeProvider.revision) {
-            presenter.toast(session, "当前会话使用的供应商配置已变化，请开启新对话后继续");
+            presenter.toast(session, UiMessages.message("当前会话使用的供应商配置已变化，请开启新对话后继续"));
             return;
         }
         // 自定义供应商必须先由模型目录确定具体选择，禁止以空模型启动请求。
         if (!activeProvider.builtIn && activeProvider.model.isBlank()) {
             providerSettings.loadProviderModels(activeProvider);
-            presenter.toast(session, "当前供应商尚未加载到可用模型，请等待模型目录加载完成后重试");
+            presenter.toast(session, UiMessages.message("当前供应商尚未加载到可用模型，请等待模型目录加载完成后重试"));
             return;
         }
         if (Objects.equals(session.provider(), "codex") && !codex.isConnected()) {
@@ -494,7 +496,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             codex.start().thenRun(() -> ApplicationManager.getApplication().invokeLater(() -> {
                 if (sessionRegistry.find(sessionId) == session) sendInput(session, reconnectText);
             })).exceptionally(error -> {
-                ApplicationManager.getApplication().invokeLater(() -> asyncError(session, "Codex CLI 未连接", error));
+                ApplicationManager.getApplication().invokeLater(() -> asyncError(session, UiMessages.message("Codex CLI 未连接"), error));
                 return null;
             });
             return;
@@ -513,7 +515,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         // Claude Code CLI 不支持向当前进程追加输入，降级排队以保留用户输入。
         if (!Objects.equals(session.provider(), "codex")) {
             sendInput(text, referenceIds);
-            presenter.toast(session, "Claude Code 运行中暂不支持立即引导，消息已加入队列");
+            presenter.toast(session, UiMessages.message("Claude Code 运行中暂不支持立即引导，消息已加入队列"));
             return;
         }
         if (referenceIds != null && !applySendReferenceOrder(session, text, referenceIds)) return;
@@ -521,7 +523,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         if (session.threadId() == null || session.threadId().isBlank()
             || session.providerTurnId() == null || session.providerTurnId().isBlank()) {
             enqueueInput(text);
-            presenter.toast(session, "当前回合尚未准备好接收引导，消息已加入队列");
+            presenter.toast(session, UiMessages.message("当前回合尚未准备好接收引导，消息已加入队列"));
             return;
         }
 
@@ -529,7 +531,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var input = prepareInput(session, text);
         addEntry(session, new ConversationEntry(
             ConversationEntry.Kind.USER,
-            "你",
+            UiMessages.message("你"),
             input.display(),
             null,
             input.fileReferences().stream().map(reference -> absolutePath(reference.path())).toList()
@@ -550,7 +552,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 if (session.pendingUserMessageCount() > 0) {
                     session.pendingUserMessageCount(session.pendingUserMessageCount() - 1);
                 }
-                asyncError(session, "无法引导当前回合", error);
+                asyncError(session, UiMessages.message("无法引导当前回合"), error);
             });
             return null;
         });
@@ -558,7 +560,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
 
     private boolean applySendReferenceOrder(ConversationSession session, String text, JsonArray ids) {
         if (!workspaceInput.applySendReferenceOrder(session, text, ids)) {
-            presenter.toast(session, "文件引用状态尚未同步，请稍后重试");
+            presenter.toast(session, UiMessages.message("文件引用状态尚未同步，请稍后重试"));
             return false;
         }
         return true;
@@ -580,9 +582,9 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var sentAttachments = List.copyOf(session.attachments());
         var sentFileReferences = List.copyOf(session.fileReferences());
         var display = new StringBuilder(embedFileReferencePaths(text, sentFileReferences));
-        if (editorContext != null) display.append("\n\n[当前编辑器上下文] ").append(editorContext.displayLabel());
+        if (editorContext != null) display.append(UiMessages.message("\n\n[当前编辑器上下文] ")).append(editorContext.displayLabel());
         sentAttachments.forEach(attachment -> display.append("\n").append(switch (attachment.kind()) {
-            case IMAGE -> "[图片] ";
+            case IMAGE -> UiMessages.message("[图片] ");
             case FILE -> "@";
         }).append(attachment.kind() == Attachment.Kind.FILE ? absolutePath(attachment.path()) : attachment.name()));
         return new QueuedInput(inputText, display.toString().trim(), sentAttachments, sentFileReferences);
@@ -596,7 +598,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         session.queuedInputs().add(input);
         addEntry(session, new ConversationEntry(
             ConversationEntry.Kind.USER,
-            "你",
+            UiMessages.message("你"),
             input.display(),
             null,
             input.fileReferences().stream().map(reference -> absolutePath(reference.path())).toList()
@@ -611,7 +613,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             session.pendingUserBody(input.display());
             addEntry(session, new ConversationEntry(
                 ConversationEntry.Kind.USER,
-                "你",
+                UiMessages.message("你"),
                 input.display(),
                 null,
                 input.fileReferences().stream().map(reference -> absolutePath(reference.path())).toList()
@@ -648,6 +650,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 "",
                 providerProfile
             );
+            changeService.prepareCommands(session.id().value());
             codexProvider.startTurn(request, event -> {
                 // Snapshot on the protocol reader, before an EDT queue delay can lose the shell baseline.
                 captureCodexCommand(event);
@@ -662,7 +665,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 current.pendingUserMessageCount(Math.max(0, current.pendingUserMessageCount() - 1));
                 current.pendingUserBody(null);
                 presenter.busy(current);
-                asyncError(current, "无法发送消息", error);
+                asyncError(current, UiMessages.message("无法发送消息"), error);
             });
         }
     }
@@ -671,13 +674,24 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         if (!sessionCoordinator.isCurrent(event.handle())) return;
         var sessionId = event.handle().sessionId().value();
         if (event instanceof TurnEvent.Item raw && raw.kind().equals("rawToolCall") && raw.phase() == TurnEvent.Item.Phase.STARTED) {
+            var input = Objects.toString(raw.data().get("input"), Objects.toString(raw.data().get("arguments"), ""));
+            changeService.commandsStarted(sessionId, raw.id(), com.codexgui.service.ShellCommandInput.parse(
+                Objects.toString(raw.data().get("name"), ""), input));
             changeService.patchStarted(sessionId, raw.id(), com.codexgui.service.PatchInputPaths.parse(
-                Objects.toString(raw.data().get("name"), ""), Objects.toString(raw.data().get("input"), "")));
+                Objects.toString(raw.data().get("name"), ""), input));
         }
         if (event instanceof TurnEvent.Item item && item.kind().equals("commandExecution")) {
             if (item.phase() == TurnEvent.Item.Phase.STARTED) {
-                changeService.commandStarted(sessionId, item.id(),
-                    Objects.toString(item.data().get("command"), ""), Objects.toString(item.data().get("cwd"), ""));
+                var cwd = Objects.toString(item.data().get("cwd"), "");
+                var commands = new ArrayList<com.codexgui.service.ShellCommandInput>();
+                if (item.data().get("commandActions") instanceof List<?> actions) {
+                    for (var action : actions.stream().limit(16).toList()) if (action instanceof Map<?, ?> data
+                        && data.get("command") instanceof String command && !command.isBlank())
+                        commands.add(new com.codexgui.service.ShellCommandInput(command, cwd));
+                }
+                if (commands.isEmpty()) commands.add(new com.codexgui.service.ShellCommandInput(
+                    Objects.toString(item.data().get("command"), ""), cwd));
+                changeService.commandsStarted(sessionId, item.id(), commands);
             }
         }
         if (event instanceof TurnEvent.Item item && item.kind().equals("fileChange") && item.phase() == TurnEvent.Item.Phase.STARTED) {
@@ -730,7 +744,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             return;
         }
         if (event instanceof TurnEvent.Notice notice) {
-            addEntry(session, new ConversationEntry(ConversationEntry.Kind.NOTICE, "正在重连", notice.message(), null));
+            addEntry(session, new ConversationEntry(ConversationEntry.Kind.NOTICE, UiMessages.message("正在重连"), notice.message(), null));
             return;
         }
         if (event instanceof TurnEvent.Completed) {
@@ -743,7 +757,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 presenter.busy(current);
                 var settings = CodexSettingsState.getInstance().snapshot(CodexSettingsState.CODEX_CHANNEL);
                 attentionService.notify(
-                    "Codex 任务已完成",
+                    UiMessages.message("Codex 任务已完成"),
                     current.title(),
                     settings.taskCompletionNotificationEnabled(),
                     settings.taskCompletionSoundEnabled()
@@ -765,7 +779,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 current.pendingUserBody(null);
                 changeService.refreshSession(current.id().value());
                 presenter.busy(current);
-                if (!failed.cancelled()) asyncError(current, "无法发送消息", failed.error());
+                if (!failed.cancelled()) asyncError(current, UiMessages.message("无法发送消息"), failed.error());
                 startNextQueuedInput(current);
             });
         }
@@ -782,9 +796,9 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         };
         var title = switch (delta.kind()) {
             case TEXT -> "Codex";
-            case THINKING -> "思考";
-            case PLAN -> "计划";
-            case COMMAND -> "命令";
+            case THINKING -> UiMessages.message("思考");
+            case PLAN -> UiMessages.message("计划");
+            case COMMAND -> UiMessages.message("命令");
         };
         var itemId = delta.itemId().isBlank() ? fallbackId(session, kind) : delta.itemId();
         if (delta.kind() != TurnEvent.Delta.Kind.COMMAND) {
@@ -804,7 +818,11 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     private void handleCodexItem(ConversationSession session, TurnEvent.Item item) {
         var source = GSON.toJsonTree(item.data()).getAsJsonObject();
         if (item.kind().equals("rawToolCall")) {
-            if (item.phase() == TurnEvent.Item.Phase.COMPLETED) changeService.patchCompleted(session.id().value(), item.id());
+            if (item.phase() == TurnEvent.Item.Phase.COMPLETED) {
+                changeService.commandCompleted(session.id().value(), item.id());
+                changeService.patchCompleted(session.id().value(), item.id());
+                changeService.refreshSession(session.id().value());
+            }
             return;
         }
         if ((item.kind().equals("commandExecution") || item.kind().equals("fileChange")) && item.phase() == TurnEvent.Item.Phase.COMPLETED) {
@@ -883,7 +901,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             } else if (delta.kind() == TurnEvent.Delta.Kind.THINKING && settings.streamResponses()) {
                 ApplicationManager.getApplication().invokeLater(() -> sessionCoordinator.apply(
                     turnHandle, current -> appendEntry(
-                        current, delta.itemId(), ConversationEntry.Kind.REASONING, "思考", delta.text())));
+                        current, delta.itemId(), ConversationEntry.Kind.REASONING, UiMessages.message("思考"), delta.text())));
             }
             return;
         }
@@ -894,7 +912,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                     current,
                     tool.id(),
                     ConversationEntry.Kind.COMMAND,
-                    "Claude 工具",
+                    UiMessages.message("Claude 工具"),
                     tool.name() + "\n\n" + GSON.toJson(tool.input())
                 )));
             return;
@@ -930,16 +948,16 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                     }
                     if (!completed.model().isBlank()) CodexSettingsState.getInstance().setClaudeModel(completed.model());
                     toolIds.forEach(id -> appendEntry(
-                        current, id, ConversationEntry.Kind.COMMAND, "Claude 工具", "\n\n执行状态：completed"));
+                        current, id, ConversationEntry.Kind.COMMAND, UiMessages.message("Claude 工具"), UiMessages.message("\n\n执行状态：completed")));
                     presenter.thread(current);
                     attentionService.notify(
-                        "Claude 任务已完成",
+                        UiMessages.message("Claude 任务已完成"),
                         current.title(),
                         settings.taskCompletionNotificationEnabled(),
                         settings.taskCompletionSoundEnabled()
                     );
                 } else if (failed != null && !failed.cancelled()) {
-                    asyncError(current, "无法发送 Claude Code 消息", failed.error());
+                    asyncError(current, UiMessages.message("无法发送 Claude Code 消息"), failed.error());
                 }
                 changeService.finishCommands(current.id().value());
                 changeService.refreshSession(current.id().value());
@@ -957,11 +975,11 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var result = new StringBuilder(input.inputText());
         // Claude Code 通过工作区工具读取附件，因此显式提供绝对路径并保留原始用户文本。
         for (var reference : input.fileReferences()) {
-            result.append("\n\n[引用文件] ").append(absolutePath(reference.path()));
+            result.append(UiMessages.message("\n\n[引用文件] ")).append(absolutePath(reference.path()));
         }
         for (var attachment : input.attachments()) {
             result.append("\n\n[")
-                .append(attachment.kind() == Attachment.Kind.IMAGE ? "图片" : "附件")
+                .append(attachment.kind() == Attachment.Kind.IMAGE ? UiMessages.message("图片") : UiMessages.message("附件"))
                 .append("] ")
                 .append(absolutePath(attachment.path()));
         }
@@ -1137,14 +1155,14 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             && !Objects.equals(type, "fileChange")) return;
         switch (type) {
             case "agentMessage" -> replaceEntry(session, id, ConversationEntry.Kind.ASSISTANT, "Codex", "");
-            case "plan" -> replaceEntry(session, id, ConversationEntry.Kind.PLAN, "计划", "");
+            case "plan" -> replaceEntry(session, id, ConversationEntry.Kind.PLAN, UiMessages.message("计划"), "");
             case "commandExecution" -> {
                 completedCommandItems.remove(commandKey(session, id));
                 replaceEntry(
                     session,
                     id,
                     ConversationEntry.Kind.COMMAND,
-                    "命令",
+                    UiMessages.message("命令"),
                     "$ " + string(item, "command", "") + "\n\n"
                 );
             }
@@ -1152,7 +1170,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 session,
                 id,
                 ConversationEntry.Kind.MCP,
-                "MCP 工具",
+                UiMessages.message("MCP 工具"),
                 string(item, "server", "") + " / " + string(item, "tool", "")
             );
             case "fileChange" -> updateFileChangeDiffs(session.id().value(), item);
@@ -1173,7 +1191,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                     var content = array(item, "content");
                     addEntry(session, new ConversationEntry(
                         ConversationEntry.Kind.USER,
-                        "你",
+                        UiMessages.message("你"),
                         userMessageText(content),
                         id,
                         userMessageReferencePaths(content)
@@ -1183,7 +1201,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             case "agentMessage" -> replaceEntry(
                 session, id, ConversationEntry.Kind.ASSISTANT, "Codex", string(item, "text", ""));
             case "plan" -> replaceEntry(
-                session, id, ConversationEntry.Kind.PLAN, "计划", string(item, "text", ""));
+                session, id, ConversationEntry.Kind.PLAN, UiMessages.message("计划"), string(item, "text", ""));
             case "commandExecution" -> {
                 var commandKey = commandKey(session, id);
                 completedCommandItems.add(commandKey);
@@ -1194,25 +1212,25 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 if (!output.isBlank()) body.append("\n\n").append(output);
                 var hasExitCode = item.has("exitCode") && !item.get("exitCode").isJsonNull();
                 var exitCode = hasExitCode ? item.get("exitCode").getAsInt() : 0;
-                if (hasExitCode) body.append("\n\n退出码：").append(exitCode);
+                if (hasExitCode) body.append(UiMessages.message("\n\n退出码：")).append(exitCode);
                 var status = string(item, "status", "");
                 if (status.isBlank()) status = !hasExitCode || exitCode == 0 ? "completed" : "failed";
-                body.append("\n\n执行状态：").append(status);
-                replaceEntry(session, id, ConversationEntry.Kind.COMMAND, "命令", body.toString());
+                body.append(UiMessages.message("\n\n执行状态：")).append(status);
+                replaceEntry(session, id, ConversationEntry.Kind.COMMAND, UiMessages.message("命令"), body.toString());
             }
             case "mcpToolCall" -> replaceEntry(
                 session,
                 id,
                 ConversationEntry.Kind.MCP,
-                "MCP 工具",
+                UiMessages.message("MCP 工具"),
                 string(item, "server", "") + " / " + string(item, "tool", "")
-                    + "\n状态：" + string(item, "status", "")
+                    + UiMessages.message("\n状态：") + string(item, "status", "")
             );
             case "fileChange" -> updateFileChangeDiffs(session.id().value(), item);
             case "contextCompaction" -> addEntry(session, new ConversationEntry(
                 ConversationEntry.Kind.NOTICE,
-                "上下文整理",
-                "Codex 已压缩当前会话上下文。",
+                UiMessages.message("上下文整理"),
+                UiMessages.message("Codex 已压缩当前会话上下文。"),
                 id
             ));
             default -> {
@@ -1248,8 +1266,8 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             var referencePath = FileReferenceText.parse(string(input, "text", ""));
             var part = switch (string(input, "type", "")) {
                 case "text" -> referencePath == null ? string(input, "text", "") : "@" + mentionPath(referencePath);
-                case "mention" -> "@" + mentionPath(string(input, "path", string(input, "name", "文件")));
-                case "localImage", "image" -> "[图片] " + string(input, "path", "");
+                case "mention" -> "@" + mentionPath(string(input, "path", string(input, "name", UiMessages.message("文件"))));
+                case "localImage", "image" -> UiMessages.message("[图片] ") + string(input, "path", "");
                 case "skill" -> "[Skill] " + string(input, "name", "");
                 default -> "";
             };
@@ -1353,11 +1371,11 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 var error = CodexError.from(params);
                 addEntry(session, new ConversationEntry(
                     error.willRetry() ? ConversationEntry.Kind.NOTICE : ConversationEntry.Kind.ERROR,
-                    error.willRetry() ? "正在重连" : "Codex 错误", error.message(), null));
+                    error.willRetry() ? UiMessages.message("正在重连") : UiMessages.message("Codex 错误"), error.message(), null));
             }
             case "warning", "configWarning", "deprecationNotice" -> addEntry(session, new ConversationEntry(
                 ConversationEntry.Kind.NOTICE,
-                "提示",
+                UiMessages.message("提示"),
                 string(params, "message", params.toString()),
                 null
             ));
@@ -1407,7 +1425,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         presenter.questions(session, requestId, questions);
         var settings = CodexSettingsState.getInstance().getState();
         attentionService.notify(
-            "Codex 有一些问题想问你",
+            UiMessages.message("Codex 有一些问题想问你"),
             session.title(),
             settings.askUserQuestionNotificationEnabled,
             settings.askUserQuestionSoundEnabled
@@ -1419,7 +1437,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var session = activeSession();
         session.busy(false);
         presenter.busy(session);
-        addEntry(session, new ConversationEntry(ConversationEntry.Kind.ERROR, "连接错误", message, null));
+        addEntry(session, new ConversationEntry(ConversationEntry.Kind.ERROR, UiMessages.message("连接错误"), message, null));
     }
 
     private void asyncError(ConversationSession session, String title, Throwable throwable) {

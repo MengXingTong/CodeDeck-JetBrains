@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.ApprovalCoordinator;
 import com.codexgui.conversation.ConversationSession;
 import com.codexgui.conversation.SessionCoordinator;
@@ -114,9 +116,9 @@ final class CodexFeatureCoordinator {
                 }
             }
             listener.skillsChanged(items, errors);
-            if (notify) listener.toast(items.isEmpty() ? "当前工作区没有可用的 Skill" : "Skills 已重新加载");
+            if (notify) listener.toast(items.isEmpty() ? UiMessages.message("当前工作区没有可用的 Skill") : UiMessages.message("Skills 已重新加载"));
         })).exceptionally(error -> {
-            listener.asyncError("无法读取 Skills", error);
+            listener.asyncError(UiMessages.message("无法读取 Skills"), error);
             return null;
         });
     }
@@ -125,17 +127,17 @@ final class CodexFeatureCoordinator {
         var path = string(request, "path", "");
         var enabled = request.has("enabled") && request.get("enabled").getAsBoolean();
         if (path.isBlank()) {
-            listener.toast("该 Skill 缺少有效路径");
+            listener.toast(UiMessages.message("该 Skill 缺少有效路径"));
             return;
         }
         codex.setSkillEnabled(path, enabled).thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
             var effectiveEnabled = result.has("effectiveEnabled") && result.get("effectiveEnabled").getAsBoolean();
             listener.skillEnabled(path, effectiveEnabled);
-            listener.toast(effectiveEnabled ? "Skill 已启用，Codex 可自动调用" : "Skill 已停用");
+            listener.toast(effectiveEnabled ? UiMessages.message("Skill 已启用，Codex 可自动调用") : UiMessages.message("Skill 已停用"));
             loadSkills(true, false);
         })).exceptionally(error -> {
             loadSkills(true, false);
-            listener.asyncError(enabled ? "无法启用 Skill" : "无法停用 Skill", error);
+            listener.asyncError(enabled ? UiMessages.message("无法启用 Skill") : UiMessages.message("无法停用 Skill"), error);
             return null;
         });
     }
@@ -143,12 +145,12 @@ final class CodexFeatureCoordinator {
     void importSkill(String scope) {
         var chooser = new JFileChooser(root.toFile());
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        chooser.setDialogTitle(Objects.equals(scope, "user") ? "选择要导入的用户 Skill 目录" : "选择要导入的项目 Skill 目录");
+        chooser.setDialogTitle(Objects.equals(scope, "user") ? UiMessages.message("选择要导入的用户 Skill 目录") : UiMessages.message("选择要导入的项目 Skill 目录"));
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
 
         var source = chooser.getSelectedFile().toPath().toAbsolutePath().normalize();
         if (!Files.isRegularFile(source.resolve("SKILL.md"))) {
-            Messages.showErrorDialog(project, "所选目录中没有 SKILL.md。", "导入 Skill 失败");
+            Messages.showErrorDialog(project, UiMessages.message("所选目录中没有 SKILL.md。"), UiMessages.message("导入 Skill 失败"));
             return;
         }
 
@@ -158,11 +160,11 @@ final class CodexFeatureCoordinator {
         parent = parent.toAbsolutePath().normalize();
         var target = parent.resolve(source.getFileName()).normalize();
         if (!target.startsWith(parent) || Objects.equals(source, target)) {
-            listener.toast(Objects.equals(source, target) ? "该 Skill 已位于目标目录" : "Skill 目标路径无效");
+            listener.toast(Objects.equals(source, target) ? UiMessages.message("该 Skill 已位于目标目录") : UiMessages.message("Skill 目标路径无效"));
             return;
         }
         if (Files.exists(target)) {
-            Messages.showErrorDialog(project, "目标目录已存在：\n" + target, "导入 Skill 失败");
+            Messages.showErrorDialog(project, UiMessages.message("目标目录已存在：\n") + target, UiMessages.message("导入 Skill 失败"));
             return;
         }
 
@@ -170,18 +172,18 @@ final class CodexFeatureCoordinator {
             Files.createDirectories(parent);
             copySkillDirectory(source, target);
             LocalFileSystem.getInstance().refreshNioFiles(List.of(target), true, true, null);
-            listener.toast(Objects.equals(scope, "user") ? "用户 Skill 已导入" : "项目 Skill 已导入");
+            listener.toast(Objects.equals(scope, "user") ? UiMessages.message("用户 Skill 已导入") : UiMessages.message("项目 Skill 已导入"));
             loadSkills(true, false);
         } catch (IOException error) {
             deleteImportedDirectory(target);
-            Messages.showErrorDialog(project, error.getMessage(), "导入 Skill 失败");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("导入 Skill 失败"));
         }
     }
 
     void openSkill(JsonObject request) {
         var rawPath = string(request, "path", "").trim();
         if (rawPath.isBlank()) {
-            listener.toast("该 Skill 缺少有效路径");
+            listener.toast(UiMessages.message("该 Skill 缺少有效路径"));
             return;
         }
         try {
@@ -189,12 +191,12 @@ final class CodexFeatureCoordinator {
             var target = Files.isDirectory(path) ? path.resolve("SKILL.md") : path;
             var file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(target);
             if (file == null) {
-                listener.toast("无法打开 Skill 源文件");
+                listener.toast(UiMessages.message("无法打开 Skill 源文件"));
                 return;
             }
             new OpenFileDescriptor(project, file).navigate(true);
         } catch (RuntimeException error) {
-            Messages.showErrorDialog(project, error.getMessage(), "打开 Skill 失败");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("打开 Skill 失败"));
         }
     }
 
@@ -202,13 +204,13 @@ final class CodexFeatureCoordinator {
         var session = activeSession.get();
         if (session.threadId() == null || session.busy()) return;
         if (Objects.equals(session.provider(), "claude")) {
-            listener.toast("Claude Code 由 CLI 自动管理上下文，无需手动压缩");
+            listener.toast(UiMessages.message("Claude Code 由 CLI 自动管理上下文，无需手动压缩"));
             return;
         }
-        codex.compactThread(session.threadId()).thenRun(() -> listener.toast(session, "上下文压缩完成"))
+        codex.compactThread(session.threadId()).thenRun(() -> listener.toast(session, UiMessages.message("上下文压缩完成")))
             .exceptionally(error -> {
                 ApplicationManager.getApplication().invokeLater(
-                    () -> listener.asyncError(session, "无法压缩上下文", error));
+                    () -> listener.asyncError(session, UiMessages.message("无法压缩上下文"), error));
                 return null;
             });
     }
@@ -216,7 +218,7 @@ final class CodexFeatureCoordinator {
     void reviewCurrentChanges() {
         var session = activeSession.get();
         if (session.threadId() == null || session.busy()) {
-            listener.toast("请先创建或打开一个会话");
+            listener.toast(UiMessages.message("请先创建或打开一个会话"));
             return;
         }
         // Claude 没有专用 Review RPC，沿用普通提示词发起审查。
@@ -236,7 +238,7 @@ final class CodexFeatureCoordinator {
                 approvalCoordinator.clearTurn(turnHandle);
                 sessionCoordinator.complete(turnHandle, current -> {
                     listener.busyChanged(current);
-                    listener.asyncError(current, "无法启动代码审查", error);
+                    listener.asyncError(current, UiMessages.message("无法启动代码审查"), error);
                 });
             });
             return null;
@@ -247,22 +249,22 @@ final class CodexFeatureCoordinator {
         var session = activeSession.get();
         if (session.threadId() == null || session.busy()) return;
         if (Objects.equals(session.provider(), "claude")) {
-            listener.toast("Claude Code CLI 暂不支持从此界面回溯上一回合");
+            listener.toast(UiMessages.message("Claude Code CLI 暂不支持从此界面回溯上一回合"));
             return;
         }
         if (Messages.showYesNoDialog(
             project,
-            "回退上一轮会话？工作区文件仍由修改面板单独管理。",
-            "回退上一轮",
-            "回退",
-            "取消",
+            UiMessages.message("回退上一轮会话？工作区文件仍由修改面板单独管理。"),
+            UiMessages.message("回退上一轮"),
+            UiMessages.message("回退"),
+            UiMessages.message("取消"),
             Messages.getWarningIcon()
         ) != Messages.YES) return;
         codex.rollbackThread(session.threadId()).thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
             if (sessionRegistry.find(session.id()) == session) listener.threadRolledBack(session, result);
         })).exceptionally(error -> {
             ApplicationManager.getApplication().invokeLater(
-                () -> listener.asyncError(session, "无法回退会话", error));
+                () -> listener.asyncError(session, UiMessages.message("无法回退会话"), error));
             return null;
         });
     }
@@ -270,25 +272,25 @@ final class CodexFeatureCoordinator {
     void showMcpServers() {
         var session = activeSession.get();
         if (Objects.equals(session.provider(), "claude")) {
-            listener.toast("Claude Code 的 MCP 配置由 Claude CLI 管理");
+            listener.toast(UiMessages.message("Claude Code 的 MCP 配置由 Claude CLI 管理"));
             return;
         }
         if (!codex.isConnected()) {
-            listener.toast("Codex 正在连接，请稍后重试");
+            listener.toast(UiMessages.message("Codex 正在连接，请稍后重试"));
             return;
         }
         readMcpServers(session, ignored -> {}).thenAccept(items -> ApplicationManager.getApplication().invokeLater(() -> {
             var value = new StringBuilder();
             for (var element : items) {
-                value.append("• ").append(string(element.getAsJsonObject(), "name", "未命名服务器")).append('\n');
+                value.append("• ").append(string(element.getAsJsonObject(), "name", UiMessages.message("未命名服务器"))).append('\n');
             }
             Messages.showInfoMessage(
                 project,
-                value.isEmpty() ? "当前没有已配置的 MCP 服务器。" : value.toString(),
-                "Codex MCP 服务器"
+                value.isEmpty() ? UiMessages.message("当前没有已配置的 MCP 服务器。") : value.toString(),
+                UiMessages.message("Codex MCP 服务器")
             );
         })).exceptionally(error -> {
-            listener.asyncError("无法读取 MCP 服务器", error);
+            listener.asyncError(UiMessages.message("无法读取 MCP 服务器"), error);
             return null;
         });
     }
@@ -307,10 +309,10 @@ final class CodexFeatureCoordinator {
             .thenCompose(ignored -> readMcpServers(session, items -> listener.mcpServersChanged(session, items)))
             .thenAccept(items -> {
                 listener.mcpServersChanged(session, items);
-                if (reload) listener.toast("MCP 配置已重新加载");
+                if (reload) listener.toast(UiMessages.message("MCP 配置已重新加载"));
             }).exceptionally(error -> {
-                listener.mcpLog("error", "", "读取 MCP 服务器失败：" + errorMessage(error));
-                listener.asyncError("无法读取 MCP 服务器", error);
+                listener.mcpLog("error", "", UiMessages.message("读取 MCP 服务器失败：") + errorMessage(error));
+                listener.asyncError(UiMessages.message("无法读取 MCP 服务器"), error);
                 return null;
             }).whenComplete((ignored, error) -> {
                 boolean refresh, nextReload;
@@ -351,10 +353,10 @@ final class CodexFeatureCoordinator {
                 throw new CompletionException(configuration.error());
             }
             if (statusRead.error() != null) {
-                warning.accept("MCP 连接状态暂不可用，已保留配置，可稍后刷新重试：" + errorMessage(statusRead.error()));
+                warning.accept(UiMessages.message("MCP 连接状态暂不可用，已保留配置，可稍后刷新重试：") + errorMessage(statusRead.error()));
             }
             if (configuration.error() != null) {
-                warning.accept("MCP 配置暂不可用，当前仅显示运行时状态：" + errorMessage(configuration.error()));
+                warning.accept(UiMessages.message("MCP 配置暂不可用，当前仅显示运行时状态：") + errorMessage(configuration.error()));
             }
             return mergeMcpServers(statusRead.valueOrEmpty(), configuration.valueOrEmpty());
         });
@@ -413,12 +415,12 @@ final class CodexFeatureCoordinator {
         var name = string(request, "name", "").trim();
         var originalName = string(request, "originalName", "").trim();
         if (!validMcpName(name) || !request.has("config") || !request.get("config").isJsonObject()) {
-            listener.toast("MCP 配置无效：名称仅支持字母、数字、下划线和连字符");
+            listener.toast(UiMessages.message("MCP 配置无效：名称仅支持字母、数字、下划线和连字符"));
             return;
         }
         var config = request.getAsJsonObject("config").deepCopy();
         if (string(config, "command", "").isBlank() && string(config, "url", "").isBlank()) {
-            listener.toast("MCP 配置必须包含 command 或 url");
+            listener.toast(UiMessages.message("MCP 配置必须包含 command 或 url"));
             return;
         }
         var operation = codex.writeConfigValue("mcp_servers." + name, config);
@@ -427,10 +429,10 @@ final class CodexFeatureCoordinator {
                 ignored -> codex.writeConfigValue("mcp_servers." + originalName, JsonNull.INSTANCE));
         }
         operation.thenCompose(ignored -> codex.reloadMcpServers()).thenRun(() -> {
-            listener.toast(originalName.isBlank() ? "MCP 服务器已添加" : "MCP 服务器配置已保存");
+            listener.toast(originalName.isBlank() ? UiMessages.message("MCP 服务器已添加") : UiMessages.message("MCP 服务器配置已保存"));
             loadMcpServers(false);
         }).exceptionally(error -> {
-            listener.asyncError("无法保存 MCP 服务器", error);
+            listener.asyncError(UiMessages.message("无法保存 MCP 服务器"), error);
             return null;
         });
     }
@@ -441,10 +443,10 @@ final class CodexFeatureCoordinator {
         codex.writeConfigValue("mcp_servers." + name, JsonNull.INSTANCE)
             .thenCompose(ignored -> codex.reloadMcpServers())
             .thenRun(() -> {
-                listener.toast("MCP 服务器已删除");
+                listener.toast(UiMessages.message("MCP 服务器已删除"));
                 loadMcpServers(false);
             }).exceptionally(error -> {
-                listener.asyncError("无法删除 MCP 服务器", error);
+                listener.asyncError(UiMessages.message("无法删除 MCP 服务器"), error);
                 return null;
             });
     }
@@ -456,10 +458,10 @@ final class CodexFeatureCoordinator {
         codex.writeConfigValue("mcp_servers." + name + ".enabled", new JsonPrimitive(enabled))
             .thenCompose(ignored -> codex.reloadMcpServers())
             .thenRun(() -> {
-                listener.toast(enabled ? "MCP 服务器已启用" : "MCP 服务器已停用");
+                listener.toast(enabled ? UiMessages.message("MCP 服务器已启用") : UiMessages.message("MCP 服务器已停用"));
                 loadMcpServers(false);
             }).exceptionally(error -> {
-                listener.asyncError("无法切换 MCP 服务器", error);
+                listener.asyncError(UiMessages.message("无法切换 MCP 服务器"), error);
                 return null;
             });
     }
@@ -475,13 +477,13 @@ final class CodexFeatureCoordinator {
         codex.loginMcpServer(name, session.threadId()).thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
             var authorizationUrl = string(result, "authorizationUrl", "");
             if (authorizationUrl.isBlank()) {
-                listener.toast("MCP 服务器未返回登录地址");
+                listener.toast(UiMessages.message("MCP 服务器未返回登录地址"));
                 return;
             }
             BrowserUtil.browse(authorizationUrl);
-            listener.toast("已在浏览器中打开 MCP 登录页面");
+            listener.toast(UiMessages.message("已在浏览器中打开 MCP 登录页面"));
         })).exceptionally(error -> {
-            listener.asyncError("无法登录 MCP 服务器", error);
+            listener.asyncError(UiMessages.message("无法登录 MCP 服务器"), error);
             return null;
         });
     }
@@ -495,12 +497,12 @@ final class CodexFeatureCoordinator {
             }
             var file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
             if (file == null) {
-                listener.toast("无法打开 Codex 配置文件");
+                listener.toast(UiMessages.message("无法打开 Codex 配置文件"));
                 return;
             }
             new OpenFileDescriptor(project, file).navigate(true);
         } catch (IOException error) {
-            Messages.showErrorDialog(project, error.getMessage(), "打开 MCP 配置失败");
+            Messages.showErrorDialog(project, error.getMessage(), UiMessages.message("打开 MCP 配置失败"));
         }
     }
 
@@ -515,13 +517,13 @@ final class CodexFeatureCoordinator {
             var primary = rateLimits == null ? null : rateLimits.getAsJsonObject("primary");
             var value = new StringBuilder();
             if (accountData != null) {
-                value.append("账户：").append(string(accountData, "email", string(accountData, "type", "OpenAI"))).append('\n');
+                value.append(UiMessages.message("账户：")).append(string(accountData, "email", string(accountData, "type", "OpenAI"))).append('\n');
             }
-            if (summary != null) value.append("累计 Token：").append(string(summary, "lifetimeTokens", "暂无")).append('\n');
-            if (primary != null) value.append("当前窗口已使用：").append(string(primary, "usedPercent", "0")).append('%');
-            Messages.showInfoMessage(project, value.isEmpty() ? "暂无用量数据" : value.toString(), "Codex 用量");
+            if (summary != null) value.append(UiMessages.message("累计 Token：")).append(string(summary, "lifetimeTokens", UiMessages.message("暂无"))).append('\n');
+            if (primary != null) value.append(UiMessages.message("当前窗口已使用：")).append(string(primary, "usedPercent", "0")).append('%');
+            Messages.showInfoMessage(project, value.isEmpty() ? UiMessages.message("暂无用量数据") : value.toString(), UiMessages.message("Codex 用量"));
         })).exceptionally(error -> {
-            listener.asyncError("无法读取 Codex 用量", error);
+            listener.asyncError(UiMessages.message("无法读取 Codex 用量"), error);
             return null;
         });
     }
@@ -531,12 +533,12 @@ final class CodexFeatureCoordinator {
             case "skills/changed" -> loadSkills(false);
             case "mcpServer/startupStatus/updated" -> {
                 var name = string(params, "name", string(params, "serverName", ""));
-                listener.mcpLog("info", name, "服务器启动状态已更新，正在重新读取连接状态");
+                listener.mcpLog("info", name, UiMessages.message("服务器启动状态已更新，正在重新读取连接状态"));
                 loadMcpServers(false);
             }
             case "mcpServer/oauthLogin/completed" -> {
                 var name = string(params, "name", string(params, "serverName", ""));
-                listener.mcpLog("success", name, "OAuth 登录已完成，正在重新读取连接状态");
+                listener.mcpLog("success", name, UiMessages.message("OAuth 登录已完成，正在重新读取连接状态"));
                 loadMcpServers(false);
             }
             default -> {

@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.model.Attachment;
 import com.codexgui.model.FileReference;
 import com.codexgui.settings.CodexSettingsState;
@@ -58,7 +60,7 @@ public final class CodexAppServerService implements Disposable {
         private long generation;
 
         synchronized long beginStart() {
-            if (state == LifecycleState.DISPOSED) throw new IllegalStateException("Codex 服务已释放");
+            if (state == LifecycleState.DISPOSED) throw new IllegalStateException(UiMessages.message("Codex 服务已释放"));
             state = LifecycleState.STARTING;
             return ++generation;
         }
@@ -133,7 +135,7 @@ public final class CodexAppServerService implements Disposable {
         synchronized (lifecycleLock) {
             if (lifecycle.state() == LifecycleState.READY) return CompletableFuture.completedFuture(null);
             if (lifecycle.state() == LifecycleState.DISPOSED) {
-                return CompletableFuture.failedFuture(new IllegalStateException("Codex 服务已释放"));
+                return CompletableFuture.failedFuture(new IllegalStateException(UiMessages.message("Codex 服务已释放")));
             }
             if (lifecycle.state() == LifecycleState.STOPPING && stopFuture != null) {
                 return stopFuture.thenCompose(ignored -> start());
@@ -147,7 +149,7 @@ public final class CodexAppServerService implements Disposable {
     }
 
     public CompletableFuture<Void> restart() {
-        return stop("正在重启 Codex CLI").thenCompose(ignored -> start());
+        return stop(UiMessages.message("正在重启 Codex CLI")).thenCompose(ignored -> start());
     }
 
     CompletableFuture<Void> stop(String detail) {
@@ -183,7 +185,7 @@ public final class CodexAppServerService implements Disposable {
             synchronized (lifecycleLock) {
                 if (!lifecycle.isCurrent(generation) || lifecycle.state() != LifecycleState.STARTING) {
                     terminateProcess(process);
-                    throw new CancellationException("Codex 启动已取消");
+                    throw new CancellationException(UiMessages.message("Codex 启动已取消"));
                 }
                 context = startedContext;
             }
@@ -198,7 +200,7 @@ public final class CodexAppServerService implements Disposable {
             var clientInfo = new JsonObject();
             clientInfo.addProperty("name", "codedeck-jetbrains");
             clientInfo.addProperty("title", "CodeDeck for JetBrains");
-            clientInfo.addProperty("version", "2.1.0");
+            clientInfo.addProperty("version", "2.1.1");
             var params = new JsonObject();
             params.add("clientInfo", clientInfo);
             params.add("capabilities", capabilities);
@@ -219,7 +221,7 @@ public final class CodexAppServerService implements Disposable {
         Throwable initializeError
     ) {
         if (!isCurrent(startedContext) || lifecycle.state() != LifecycleState.STARTING) {
-            result.completeExceptionally(new CancellationException("Codex 启动已取消"));
+            result.completeExceptionally(new CancellationException(UiMessages.message("Codex 启动已取消")));
             return;
         }
         if (initializeError != null) {
@@ -229,10 +231,10 @@ public final class CodexAppServerService implements Disposable {
         try {
             notifyServer(startedContext, "initialized", null);
             if (!lifecycle.transition(generation, LifecycleState.READY)) {
-                throw new CancellationException("Codex 启动已取消");
+                throw new CancellationException(UiMessages.message("Codex 启动已取消"));
             }
             result.complete(null);
-            fireConnectionChanged(true, "Codex CLI 已连接");
+            fireConnectionChanged(true, UiMessages.message("Codex CLI 已连接"));
         } catch (Exception error) {
             failStart(generation, executable, result, error);
         }
@@ -242,7 +244,7 @@ public final class CodexAppServerService implements Disposable {
         var cause = unwrap(error);
         var message = startupFailureMessage(executable, cause instanceof Exception exception ? exception : new Exception(cause));
         LOG.warn(message, cause);
-        stopGeneration(generation, "Codex CLI 启动失败", LifecycleState.FAILED);
+        stopGeneration(generation, UiMessages.message("Codex CLI 启动失败"), LifecycleState.FAILED);
         lifecycle.transition(generation, LifecycleState.FAILED);
         result.completeExceptionally(new IllegalStateException(message, cause));
     }
@@ -255,8 +257,8 @@ public final class CodexAppServerService implements Disposable {
         }
         var detail = cause.getMessage();
         if (detail == null || detail.isBlank()) detail = cause.getClass().getSimpleName();
-        return "无法启动 Codex CLI（" + executable + "）：" + detail
-            + "。请安装 OpenAI Codex CLI，或在“设置 → 工具 → CodeDeck”中指定可执行文件。";
+        return UiMessages.message("无法启动 Codex CLI（") + executable + "）：" + detail
+            + UiMessages.message("。请安装 OpenAI Codex CLI，或在“设置 → 工具 → CodeDeck”中指定可执行文件。");
     }
 
     static List<String> createCommand(String executable, CodexSettingsState.ProviderProfile provider) {
@@ -317,7 +319,7 @@ public final class CodexAppServerService implements Disposable {
                 return CompletableFuture.completedFuture(result);
             }
             if (!seenCursors.add(nextCursor) || seenCursors.size() > 1000) {
-                return CompletableFuture.failedFuture(new IOException("Codex 历史分页游标重复或超过分页上限"));
+                return CompletableFuture.failedFuture(new IOException(UiMessages.message("Codex 历史分页游标重复或超过分页上限")));
             }
             params.addProperty("cursor", nextCursor);
             return collectThreadPages(params, requestPage, threads, result, seenIds, seenCursors);
@@ -705,7 +707,7 @@ public final class CodexAppServerService implements Disposable {
         var timeout = timeoutExecutor.schedule(() -> {
             var pending = pendingRequests.remove(key);
             if (pending != null) pending.future().completeExceptionally(
-                new TimeoutException("Codex RPC 超时：" + method));
+                new TimeoutException(UiMessages.message("Codex RPC 超时：") + method));
         }, timeoutSeconds, TimeUnit.SECONDS);
         pendingRequests.put(key, new PendingRequest(future, timeout));
         try {
@@ -728,7 +730,7 @@ public final class CodexAppServerService implements Disposable {
     private ProcessContext requireReadyContext() {
         var activeContext = context;
         if (lifecycle.state() != LifecycleState.READY || activeContext == null) {
-            throw new IllegalStateException("Codex app-server 尚未就绪");
+            throw new IllegalStateException(UiMessages.message("Codex app-server 尚未就绪"));
         }
         return activeContext;
     }
@@ -737,13 +739,13 @@ public final class CodexAppServerService implements Disposable {
         synchronized (writerLock) {
             try {
                 if (context != activeContext || !lifecycle.isCurrent(activeContext.generation())) {
-                    throw new IOException("Codex app-server 进程已过期");
+                    throw new IOException(UiMessages.message("Codex app-server 进程已过期"));
                 }
                 activeContext.writer().write(GSON.toJson(message));
                 activeContext.writer().newLine();
                 activeContext.writer().flush();
             } catch (IOException error) {
-                throw new IllegalStateException("无法写入 Codex app-server", error);
+                throw new IllegalStateException(UiMessages.message("无法写入 Codex app-server"), error);
             }
         }
     }
@@ -757,10 +759,10 @@ public final class CodexAppServerService implements Disposable {
                 handleProtocolMessage(activeContext.generation(), line);
             }
         } catch (Exception error) {
-            if (isCurrent(activeContext)) fireProtocolError("Codex CLI 连接已断开", error);
+            if (isCurrent(activeContext)) fireProtocolError(UiMessages.message("Codex CLI 连接已断开"), error);
         } finally {
             if (isCurrent(activeContext)) lifecycleExecutor.execute(
-                () -> stopGeneration(activeContext.generation(), "Codex CLI 已停止", LifecycleState.FAILED));
+                () -> stopGeneration(activeContext.generation(), UiMessages.message("Codex CLI 已停止"), LifecycleState.FAILED));
         }
     }
 
@@ -804,7 +806,7 @@ public final class CodexAppServerService implements Disposable {
                 future.complete(result != null && result.isJsonObject() ? result.getAsJsonObject() : new JsonObject());
             }
         } catch (Exception error) {
-            fireProtocolError("无法解析 Codex app-server 消息", error);
+            fireProtocolError(UiMessages.message("无法解析 Codex app-server 消息"), error);
         }
     }
 
@@ -891,8 +893,8 @@ public final class CodexAppServerService implements Disposable {
     public void dispose() {
         listeners.clear();
         lifecycle.dispose();
-        stopCurrentProcess("项目已关闭", LifecycleState.DISPOSED);
-        failPending(null, "项目已关闭");
+        stopCurrentProcess(UiMessages.message("项目已关闭"), LifecycleState.DISPOSED);
+        failPending(null, UiMessages.message("项目已关闭"));
         lifecycleExecutor.shutdownNow();
         timeoutExecutor.shutdownNow();
     }

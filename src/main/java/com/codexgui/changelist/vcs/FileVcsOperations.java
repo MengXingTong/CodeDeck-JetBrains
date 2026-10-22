@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.vcs.VcsException;
 import com.codexgui.changelist.core.ChangedFile;
 
@@ -9,9 +11,9 @@ import java.util.List;
 /** Optional Perforce operations, loaded only when the IDE's Perforce plugin is available. */
 public interface FileVcsOperations {
     enum Operation {
-        REVERT("撤销修改", "恢复工作区基准版本，丢弃本地修改"),
-        CHECKOUT("迁出", "打开 Perforce 文件以供编辑，保留本地修改"),
-        CANCEL_CHECKOUT("取消迁出", "解除 Perforce 迁出状态，保留本地修改");
+        REVERT(UiMessages.message("撤销修改"), UiMessages.message("恢复工作区基准版本，丢弃本地修改")),
+        CHECKOUT(UiMessages.message("迁出"), UiMessages.message("打开 Perforce 文件以供编辑，保留本地修改")),
+        CANCEL_CHECKOUT(UiMessages.message("取消迁出"), UiMessages.message("解除 Perforce 迁出状态，保留本地修改"));
         private final String label;
         private final String description;
         Operation(String label, String description) { this.label = label; this.description = description; }

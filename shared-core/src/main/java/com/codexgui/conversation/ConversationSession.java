@@ -1,5 +1,7 @@
 package com.codexgui.conversation;
 
+import com.codexgui.i18n.Messages;
+
 import com.codexgui.model.Attachment;
 import com.codexgui.model.ConversationEntry;
 import com.codexgui.model.FileReference;
@@ -19,7 +21,7 @@ public final class ConversationSession {
     private String provider = "codex";
     private String providerProfileId = "codex-local";
     private int providerRevision = 1;
-    private String title = "新会话";
+    private String title = Messages.message("新会话");
     private String pendingUserBody;
     private int pendingUserMessageCount;
     private boolean busy;

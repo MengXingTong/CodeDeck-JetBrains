@@ -1,5 +1,7 @@
 package com.codexgui.model;
 
+import com.codexgui.i18n.Messages;
+
 import java.util.Objects;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -43,16 +45,16 @@ public record EditorFileContext(String path, int startLine, int endLine, String 
 
     public String appendTo(String userText) {
         var context = new StringBuilder(userText == null ? "" : userText);
-        context.append("\n\n[当前编辑器上下文]\n文件: ").append(path);
+        context.append(Messages.message("\n\n[当前编辑器上下文]\n文件: ")).append(path);
         if (!diffSelections.isEmpty()) {
-            context.append("\nDiff 选区（before 为变更前，after 为变更后；行号对应原始文件）:");
+            context.append(Messages.message("\nDiff 选区（before 为变更前，after 为变更后；行号对应原始文件）:"));
             for (var selection : diffSelections) {
                 context.append("\n[").append(selection.label()).append("]\n").append(selection.text());
             }
         } else if (hasSelection()) {
-            context.append("\n行号: ").append(startLine);
+            context.append(Messages.message("\n行号: ")).append(startLine);
             if (endLine != startLine) context.append('-').append(endLine);
-            context.append("\n选中内容:\n").append(selectedText);
+            context.append(Messages.message("\n选中内容:\n")).append(selectedText);
         }
         return context.toString().trim();
     }

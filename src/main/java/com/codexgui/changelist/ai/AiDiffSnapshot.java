@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.eclipse.jgit.diff.HistogramDiff;
@@ -27,12 +29,12 @@ public record AiDiffSnapshot(String file, String before, String after, String fi
     }
     public AiDiffSnapshot {
         if ((long) before.length() + after.length() > MAX_SOURCE_CHARS)
-            throw new IllegalArgumentException("文件前后内容合计超过 120,000 字符，已停止 AI 请求；请缩小文件后手动重试");
+            throw new IllegalArgumentException(UiMessages.message("文件前后内容合计超过 120,000 字符，已停止 AI 请求；请缩小文件后手动重试"));
     }
     private static String normalize(String text) { return text.replace("\r\n", "\n").replace('\r', '\n'); }
     private static String hash(String... values) {
         if ((long) values[1].length() + values[2].length() > MAX_SOURCE_CHARS)
-            throw new IllegalArgumentException("文件前后内容合计超过 120,000 字符，已停止 AI 请求");
+            throw new IllegalArgumentException(UiMessages.message("文件前后内容合计超过 120,000 字符，已停止 AI 请求"));
         try {
             var hash = MessageDigest.getInstance("SHA-256");
             for (String value : values) { hash.update(value.getBytes(StandardCharsets.UTF_8)); hash.update((byte) 0); }
@@ -51,7 +53,7 @@ public record AiDiffSnapshot(String file, String before, String after, String fi
     public JsonObject context() {
         var object = new JsonObject();
         object.addProperty("file", file); object.addProperty("version", fingerprint);
-        object.addProperty("lineNumbering", "before/after 从 1 开始；changedRanges 为从 0 开始、末端不含的范围");
+        object.addProperty("lineNumbering", UiMessages.message("before/after 从 1 开始；changedRanges 为从 0 开始、末端不含的范围"));
         object.addProperty("before", numbered(before)); object.addProperty("after", numbered(after));
         var ranges = new JsonArray();
         for (var change : changes()) {

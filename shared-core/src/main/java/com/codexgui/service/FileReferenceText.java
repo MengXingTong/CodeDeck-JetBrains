@@ -1,10 +1,12 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.Messages;
+
 import java.nio.file.Path;
 
 /** Local references must be text in the model prompt; app-server mentions are metadata. */
 public final class FileReferenceText {
-    private static final String PREFIX = "\n[引用文件] ";
+    private static final String PREFIX = Messages.message("\n[引用文件] ");
 
     private FileReferenceText() { }
 

@@ -1,5 +1,7 @@
 package com.codexgui.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.jcef.JBCefApp;
@@ -22,11 +24,12 @@ final class CodexToolWindowPanel extends JPanel implements Disposable {
 
     CodexToolWindowPanel(Project project) {
         super(new BorderLayout());
+        setLocale(UiMessages.locale());
         if (!JBCefApp.isSupported()) {
             browser = null;
             bridge = null;
             controller = null;
-            add(new JLabel("当前 JetBrains Runtime 不支持 JCEF，无法显示 CodeDeck。", SwingConstants.CENTER));
+            add(new JLabel(UiMessages.message("当前 JetBrains Runtime 不支持 JCEF，无法显示 CodeDeck。"), SwingConstants.CENTER));
             return;
         }
 
@@ -45,8 +48,10 @@ final class CodexToolWindowPanel extends JPanel implements Disposable {
 
     private String buildWebApp() {
         var template = resource("/web/index.html");
-        var bridgeScript = "window.codexHost = function(payload) {" + bridge.inject("payload") + ";};";
+        var bridgeScript = "window.codedeckLocale = '" + UiMessages.languageTag() + "';"
+            + "window.codexHost = function(payload) {" + bridge.inject("payload") + ";};";
         return template
+            .replace("lang=\"zh-CN\"", "lang=\"" + UiMessages.languageTag() + "\"")
             .replace("/*__CODEX_GUI_STYLE__*/", resource("/web/app.css"))
             .replace("/*__CODEX_GUI_BRIDGE__*/", bridgeScript)
             .replace("/*__CODEX_GUI_SCRIPT__*/", resource("/web/app.js"));
@@ -54,10 +59,10 @@ final class CodexToolWindowPanel extends JPanel implements Disposable {
 
     private String resource(String name) {
         try (InputStream input = getClass().getResourceAsStream(name)) {
-            if (input == null) throw new IllegalStateException("缺少界面资源：" + name);
+            if (input == null) throw new IllegalStateException(UiMessages.message("缺少界面资源：") + name);
             return Utf8IO.read(input);
         } catch (IOException error) {
-            throw new IllegalStateException("无法读取界面资源：" + name, error);
+            throw new IllegalStateException(UiMessages.message("无法读取界面资源：") + name, error);
         }
     }
 

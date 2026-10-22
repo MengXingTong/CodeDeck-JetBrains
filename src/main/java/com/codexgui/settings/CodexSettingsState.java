@@ -1,5 +1,7 @@
 package com.codexgui.settings;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
@@ -131,9 +133,9 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
         public String activePromptId = "";
         public String activeAgentId = "";
         public List<PromptPreset> prompts = new ArrayList<>(List.of(
-            new PromptPreset("program", "程序", "负责把方案转化为可直接使用、可编译、可维护的代码。", "将方案转化为可直接使用、可编译、可维护的代码。优先遵循现有项目结构，避免过度封装和无意义拆分。"),
-            new PromptPreset("architect", "架构师", "从工程结构、模块边界和长期维护成本审视方案。", "从工程结构、模块边界、数据流和长期维护成本审视任务。先识别约束与风险，再给出可以逐步落地的实现。"),
-            new PromptPreset("planner", "策划", "从用户体验、规则和完整工作流角度完善需求。", "从用户体验、功能规则、边界状态和完整工作流角度分析需求，确保方案明确、可验证并覆盖关键异常情况。")
+            new PromptPreset("program", UiMessages.message("程序"), UiMessages.message("负责把方案转化为可直接使用、可编译、可维护的代码。"), UiMessages.message("将方案转化为可直接使用、可编译、可维护的代码。优先遵循现有项目结构，避免过度封装和无意义拆分。")),
+            new PromptPreset("architect", UiMessages.message("架构师"), UiMessages.message("从工程结构、模块边界和长期维护成本审视方案。"), UiMessages.message("从工程结构、模块边界、数据流和长期维护成本审视任务。先识别约束与风险，再给出可以逐步落地的实现。")),
+            new PromptPreset("planner", UiMessages.message("策划"), UiMessages.message("从用户体验、规则和完整工作流角度完善需求。"), UiMessages.message("从用户体验、功能规则、边界状态和完整工作流角度分析需求，确保方案明确、可验证并覆盖关键异常情况。"))
         ));
         public List<AgentProfile> agents = new ArrayList<>();
         public List<ProviderProfile> providers = defaultProviders();
@@ -372,8 +374,8 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
             if (!"chat".equals(item.wireApi)) item.wireApi = "responses";
             if (item.revision < 1) item.revision = 1;
         }
-        addBuiltInProvider(CODEX_LOCAL_PROVIDER_ID, CODEX_CHANNEL, "Codex 本地配置");
-        addBuiltInProvider(CLAUDE_LOCAL_PROVIDER_ID, CLAUDE_CHANNEL, "Claude 本地配置");
+        addBuiltInProvider(CODEX_LOCAL_PROVIDER_ID, CODEX_CHANNEL, UiMessages.message("Codex 本地配置"));
+        addBuiltInProvider(CLAUDE_LOCAL_PROVIDER_ID, CLAUDE_CHANNEL, UiMessages.message("Claude 本地配置"));
 
         // 旧版本没有活动供应商 ID，迁移时回退到对应渠道的本地配置。
         if (providerInChannel(state.activeCodexProviderId, CODEX_CHANNEL) == null) state.activeCodexProviderId = CODEX_LOCAL_PROVIDER_ID;
@@ -435,8 +437,8 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
 
     private static List<ProviderProfile> defaultProviders() {
         return new ArrayList<>(List.of(
-            new ProviderProfile(CODEX_LOCAL_PROVIDER_ID, CODEX_CHANNEL, "Codex 本地配置", true),
-            new ProviderProfile(CLAUDE_LOCAL_PROVIDER_ID, CLAUDE_CHANNEL, "Claude 本地配置", true)
+            new ProviderProfile(CODEX_LOCAL_PROVIDER_ID, CODEX_CHANNEL, UiMessages.message("Codex 本地配置"), true),
+            new ProviderProfile(CLAUDE_LOCAL_PROVIDER_ID, CLAUDE_CHANNEL, UiMessages.message("Claude 本地配置"), true)
         ));
     }
 

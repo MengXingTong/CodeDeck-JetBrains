@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.components.JBScrollPane;
@@ -22,12 +24,12 @@ public final class AiBatchDialog extends DialogWrapper {
     private final JList<String> list = new JList<>(rows);
     private final JLabel status = new JLabel();
     private final Timer timer = new Timer(1000, e -> refresh());
-    private final Action start = new AbstractAction("开始生成") {
+    private final Action start = new AbstractAction(UiMessages.message("开始生成")) {
         @Override public void actionPerformed(ActionEvent event) {
             store.startBatch(project, state, options.options()); refresh();
         }
     };
-    private final Action stop = new AbstractAction("停止队列") {
+    private final Action stop = new AbstractAction(UiMessages.message("停止队列")) {
         @Override public void actionPerformed(ActionEvent event) { store.cancel(project, state.task()); refresh(); }
     };
     public AiBatchDialog(Project project, List<AiBatchState.Source> sources, Consumer<AiBatchState.Source> open) {
@@ -35,7 +37,7 @@ public final class AiBatchDialog extends DialogWrapper {
         store = project.getService(AiSessionStore.class); state = store.batchFor(sources);
         options = new AiOptionsPanel(com.codexgui.settings.CodexSettingsState.AnnotationScope.BATCH);
         if (state.running()) options.restore(state.options());
-        setTitle("AI 注释 · " + state.sources().size() + " 个文件"); setModal(false); setCancelButtonText("关闭");
+        setTitle(UiMessages.message("AI 注释 · ") + state.sources().size() + UiMessages.message(" 个文件")); setModal(false); setCancelButtonText(UiMessages.message("关闭"));
         state.sources().forEach(ignored -> rows.addElement("")); init();
         list.setSelectedIndex(state.selectedIndex());
         list.addListSelectionListener(e -> { if (!e.getValueIsAdjusting()) state.select(list.getSelectedIndex()); });
@@ -48,7 +50,7 @@ public final class AiBatchDialog extends DialogWrapper {
         var panel = new JPanel(new BorderLayout(4, 6)); panel.setPreferredSize(new Dimension(900, 420));
         panel.add(options, BorderLayout.NORTH); panel.add(new JBScrollPane(list), BorderLayout.CENTER);
         var footer = new JPanel(new BorderLayout()); footer.add(status, BorderLayout.CENTER);
-        var show = new JButton("查看选中文件 Diff"); show.addActionListener(e -> {
+        var show = new JButton(UiMessages.message("查看选中文件 Diff")); show.addActionListener(e -> {
             int index = list.getSelectedIndex(); if (index >= 0) open.accept(state.sources().get(index));
         }); footer.add(show, BorderLayout.EAST); panel.add(footer, BorderLayout.SOUTH); return panel;
     }
@@ -62,9 +64,9 @@ public final class AiBatchDialog extends DialogWrapper {
         var active = store.activeBatchTask();
         start.setEnabled(active == null && !state.sources().isEmpty());
         stop.setEnabled(state.running() && state.task() == active && !state.task().canceled());
-        start.putValue(Action.NAME, state.task() == null ? "开始生成（" + rows.size() + " 个文件）" : "重新开始（复用缓存）");
+        start.putValue(Action.NAME, state.task() == null ? UiMessages.message("开始生成（") + rows.size() + UiMessages.message(" 个文件）") : UiMessages.message("重新开始（复用缓存）"));
         options.setControlsEnabled(active == null);
-        status.setText(state.task() != null ? state.task().displayStatus() : "点击开始后才会请求 AI；缓存命中或已有任务的文件直接跳过");
+        status.setText(state.task() != null ? state.task().displayStatus() : UiMessages.message("点击开始后才会请求 AI；缓存命中或已有任务的文件直接跳过"));
         status.setToolTipText(status.getText());
     }
 }

@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.model.ChangeEntry;
 import com.codexgui.settings.CodexSettingsState;
 import com.intellij.openapi.Disposable;
@@ -72,6 +74,7 @@ public final class ConversationChangeTracker implements Disposable {
     private final BooleanSupplier preserveLineEndings;
     private final Map<String, LinkedHashMap<Path, Baseline>> baselinesBySession = new LinkedHashMap<>();
     private final Map<String, CommandFileCapture> commandsBySession = new LinkedHashMap<>();
+    private final Map<String, Map<String, Map<Path, Baseline>>> pendingCommands = new LinkedHashMap<>();
     private final Map<String, Map<String, Map<Path, Baseline>>> pendingPatches = new LinkedHashMap<>();
     private final Map<String, Map<Path, Baseline>> pendingWrites = new LinkedHashMap<>();
     private final CopyOnWriteArrayList<Consumer<ChangeUpdate>> listeners = new CopyOnWriteArrayList<>();
@@ -120,17 +123,59 @@ public final class ConversationChangeTracker implements Disposable {
 
     Path resolveWorkspacePath(String reportedPath) { return resolveReportedPath(reportedPath); }
 
+    public synchronized void prepareCommands(String sessionId) {
+        var repositories = new ArrayList<Path>(); repositories.add(root);
+        if (project != null) {
+            try {
+                var manager = com.intellij.openapi.vcs.ProjectLevelVcsManager.getInstance(project);
+                if (manager != null) for (var entry : manager.getAllVersionedRoots()) repositories.add(entry.toNioPath());
+            } catch (RuntimeException ignored) { /* Optional metadata capture must not prevent sending. */ }
+        }
+        prepareCommands(sessionId, repositories);
+    }
+
+    public synchronized void prepareCommands(String sessionId, List<Path> repositories) {
+        commandsBySession.computeIfAbsent(sessionKey(sessionId), ignored -> new CommandFileCapture(root)).prepare(repositories);
+    }
+
     public synchronized void commandStarted(String sessionId, String id, String command, String cwd) {
-        commandsBySession.computeIfAbsent(sessionKey(sessionId), ignored -> new CommandFileCapture(root))
-            .started(id, command, cwd);
+        commandsStarted(sessionId, id, List.of(new ShellCommandInput(command, cwd)));
+    }
+
+    public synchronized void commandsStarted(String sessionId, String id, List<ShellCommandInput> inputs) {
+        if (inputs.isEmpty()) return;
+        var key = sessionKey(sessionId);
+        var pending = pendingCommands.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+        if (pending.containsKey(id) || pending.size() >= 16) return;
+        var capture = commandsBySession.computeIfAbsent(key, ignored -> new CommandFileCapture(root));
+        capture.started(id, inputs);
+        var reserved = new LinkedHashMap<Path, Baseline>();
+        var baselines = baselinesBySession.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+        for (var before : capture.snapshot(id)) {
+            var baseline = new Baseline(before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
+                before.bytes(), hash(before.bytes()), null);
+            baselines.putIfAbsent(before.path(), baseline);
+            reserved.put(before.path(), baseline);
+        }
+        pending.put(id, reserved);
     }
 
     public synchronized void commandCompleted(String sessionId, String id) {
         var capture = commandsBySession.get(sessionKey(sessionId));
         if (capture != null) importCommandChanges(sessionKey(sessionId), capture.completed(id));
+        var key = sessionKey(sessionId);
+        var pending = pendingCommands.get(key);
+        var reserved = pending == null ? null : pending.remove(id);
+        var baselines = baselinesBySession.get(key);
+        if (reserved != null && baselines != null) for (var entry : reserved.entrySet())
+            if (baselines.get(entry.getKey()) == entry.getValue() && createChange(entry.getKey(), entry.getValue()) == null)
+                baselines.remove(entry.getKey());
+        if (pending != null && pending.isEmpty()) pendingCommands.remove(key);
     }
 
     public synchronized void finishCommands(String sessionId) {
+        var pending = pendingCommands.get(sessionKey(sessionId));
+        if (pending != null) for (var id : List.copyOf(pending.keySet())) commandCompleted(sessionId, id);
         var capture = commandsBySession.remove(sessionKey(sessionId));
         if (capture != null) importCommandChanges(sessionKey(sessionId), capture.finish());
         var patches = pendingPatches.get(sessionKey(sessionId));
@@ -178,7 +223,7 @@ public final class ConversationChangeTracker implements Disposable {
         if (changes.isEmpty()) return;
         var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
         for (var before : changes) {
-            preserveFormat(before.path(), before.bytes());
+            if (before.preserveFormat()) preserveFormat(before.path(), before.bytes());
             baselines.putIfAbsent(before.path(), new Baseline(
                 before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
                 before.bytes(), hash(before.bytes()), null));
@@ -310,6 +355,7 @@ public final class ConversationChangeTracker implements Disposable {
         var key = sessionKey(sessionId);
         pendingWrites.remove(key);
         pendingPatches.remove(key);
+        pendingCommands.remove(key);
         var capture = commandsBySession.get(key);
         if (capture != null) capture.clear();
         baselinesBySession.remove(key);
@@ -333,7 +379,7 @@ public final class ConversationChangeTracker implements Disposable {
         var failures = new ArrayList<String>();
         for (var entry : List.copyOf(baselines.entrySet())) {
             try {
-                restore(entry.getKey(), entry.getValue());
+                if (createChange(entry.getKey(), entry.getValue()) != null) restore(entry.getKey(), entry.getValue());
                 var capture = commandsBySession.get(key);
                 if (capture != null) capture.forget(entry.getKey());
                 baselines.remove(entry.getKey());
@@ -344,13 +390,14 @@ public final class ConversationChangeTracker implements Disposable {
         }
         if (baselines.isEmpty()) baselinesBySession.remove(key);
         fireChanged(key);
-        if (!failures.isEmpty()) throw new IOException("以下文件无法撤销：\n" + String.join("\n", failures));
+        if (!failures.isEmpty()) throw new IOException(UiMessages.message("以下文件无法撤销：\n") + String.join("\n", failures));
     }
 
     public synchronized void clearSession(String sessionId) {
         pendingWrites.remove(sessionKey(sessionId));
         var key = sessionKey(sessionId);
         pendingPatches.remove(key);
+        pendingCommands.remove(key);
         commandsBySession.remove(key);
         baselinesBySession.remove(key);
         fireChanged(key);
@@ -414,6 +461,8 @@ public final class ConversationChangeTracker implements Disposable {
         if (writes != null) writes.remove(path);
         var patches = pendingPatches.get(sessionId);
         if (patches != null) patches.values().forEach(values -> values.remove(path));
+        var commands = pendingCommands.get(sessionId);
+        if (commands != null) commands.values().forEach(values -> values.remove(path));
         var capture = commandsBySession.get(sessionId);
         if (capture != null) capture.forget(path);
         var baselines = baselinesBySession.get(sessionId);
@@ -475,7 +524,7 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     private void restore(Path path, Baseline baseline) throws IOException {
-        if (!baseline.reversible()) throw new IOException("文件超过 5 MiB，未保存可撤销基线");
+        if (!baseline.reversible()) throw new IOException(UiMessages.message("文件超过 5 MiB，未保存可撤销基线"));
         if (baseline.kind() == BaselineKind.ABSENT) {
             delete(path);
             return;
@@ -494,13 +543,21 @@ public final class ConversationChangeTracker implements Disposable {
                 // Restore original bytes through VFS. Document.setText accepts LF only and saving it
                 // would re-encode BOM / mixed separators using the current file's metadata.
                 WriteAction.run(() -> {
+                    if (!file.isWritable()) file.setWritable(true);
                     file.setBinaryContent(content);
                     if (document != null) manager.reloadFromDisk(document);
                 });
                 return;
             }
         }
+        makeDiskWritable(path);
         Files.write(path, content);
+    }
+
+    private void makeDiskWritable(Path path) throws IOException {
+        var attributes = Files.getFileAttributeView(path, java.nio.file.attribute.DosFileAttributeView.class,
+            java.nio.file.LinkOption.NOFOLLOW_LINKS);
+        if (attributes != null && Files.exists(path) && attributes.readAttributes().isReadOnly()) attributes.setReadOnly(false);
     }
 
     private void preserveFormat(Path path, byte[] before) {
@@ -521,7 +578,7 @@ public final class ConversationChangeTracker implements Disposable {
             refresh(path);
         } catch (IOException error) {
             java.util.logging.Logger.getLogger(ConversationChangeTracker.class.getName())
-                .warning("无法保持文件换行格式: " + path + " (" + error.getMessage() + ")");
+                .warning(UiMessages.message("无法保持文件换行格式: ") + path + " (" + error.getMessage() + ")");
         }
     }
 
@@ -532,6 +589,7 @@ public final class ConversationChangeTracker implements Disposable {
                 final IOException[] failure = new IOException[1];
                 WriteAction.run(() -> {
                     try {
+                        if (!file.isWritable()) file.setWritable(true);
                         file.delete(this);
                     } catch (IOException error) {
                         failure[0] = error;
@@ -541,6 +599,7 @@ public final class ConversationChangeTracker implements Disposable {
                 return;
             }
         }
+        makeDiskWritable(path);
         Files.deleteIfExists(path);
     }
 
@@ -650,6 +709,7 @@ public final class ConversationChangeTracker implements Disposable {
     public synchronized void dispose() {
         pendingWrites.clear();
         pendingPatches.clear();
+        pendingCommands.clear();
         commandsBySession.clear();
         baselinesBySession.clear();
         listeners.clear();

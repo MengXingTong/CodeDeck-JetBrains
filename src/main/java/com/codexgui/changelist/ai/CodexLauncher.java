@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
@@ -19,7 +21,7 @@ public final class CodexLauncher {
         String selected = unquote(configured == null ? "" : configured.strip());
         if (!selected.isBlank()) {
             try { return launcher(Path.of(selected), directories, environment, windows); }
-            catch (InvalidPathException e) { throw new IOException("Codex CLI 路径格式无效：" + selected, e); }
+            catch (InvalidPathException e) { throw new IOException(UiMessages.message("Codex CLI 路径格式无效：") + selected, e); }
         }
         var candidates = executables("codex", directories, windows);
         var errors = new ArrayList<String>();
@@ -27,21 +29,21 @@ public final class CodexLauncher {
             try { return launcher(candidate, directories, environment, windows); }
             catch (IOException e) { errors.add(e.getMessage()); }
         }
-        if (!errors.isEmpty()) throw new IOException("未找到可启动的 Codex CLI：\n" + String.join("\n", errors.stream().limit(3).toList()));
-        throw new IOException("找不到 Codex CLI；请安装官方 CLI 并执行 codex login，或在侧栏设置中指定路径");
+        if (!errors.isEmpty()) throw new IOException(UiMessages.message("未找到可启动的 Codex CLI：\n") + String.join("\n", errors.stream().limit(3).toList()));
+        throw new IOException(UiMessages.message("找不到 Codex CLI；请安装官方 CLI 并执行 codex login，或在侧栏设置中指定路径"));
     }
 
     private static List<String> launcher(Path candidate, List<Path> directories, Map<String, String> environment,
                                           boolean windows) throws IOException {
         Path executable = candidate.toAbsolutePath().normalize();
-        if (!Files.isRegularFile(executable)) throw new IOException("Codex CLI 路径不存在：" + executable);
+        if (!Files.isRegularFile(executable)) throw new IOException(UiMessages.message("Codex CLI 路径不存在：") + executable);
         String name = executable.getFileName().toString().toLowerCase(Locale.ROOT);
         if (!name.endsWith(".cmd") && !name.endsWith(".bat") && !name.endsWith(".ps1"))
             return List.of(executable.toString());
         Path parent = executable.getParent();
         Path script = parent.resolve("node_modules/@openai/codex/bin/codex.js");
         if (!Files.isRegularFile(script))
-            throw new IOException("Codex npm 启动脚本对应的包文件不存在：" + script + "；请重新安装 CLI 或指定 codex.exe");
+            throw new IOException(UiMessages.message("Codex npm 启动脚本对应的包文件不存在：") + script + UiMessages.message("；请重新安装 CLI 或指定 codex.exe"));
 
         // Use the official npm entry point directly; no script/model/prompt is passed through a shell.
         Path node = parent.resolve(windows ? "node.exe" : "node");
@@ -61,8 +63,8 @@ public final class CodexLauncher {
             }
         }
         if (node != null) return List.of(node.toAbsolutePath().normalize().toString(), script.toString());
-        throw new IOException("已找到官方 npm Codex 启动器，但找不到 " + (windows ? "node.exe" : "node")
-                + "：" + executable + "；请将 Node.js 加入 Rider 可见的 PATH，或在侧栏设置中指定 codex.exe");
+        throw new IOException(UiMessages.message("已找到官方 npm Codex 启动器，但找不到 ") + (windows ? "node.exe" : "node")
+                + "：" + executable + UiMessages.message("；请将 Node.js 加入 Rider 可见的 PATH，或在侧栏设置中指定 codex.exe"));
     }
 
     private static List<Path> searchDirectories(Map<String, String> environment, Path home, boolean windows) {

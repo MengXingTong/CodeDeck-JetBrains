@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.changelist.vcs.NativeChanges;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -16,7 +18,7 @@ public final class AiBatchState {
 
     AiBatchState(List<Source> sources) {
         this.sources = List.copyOf(sources);
-        sources.forEach(ignored -> rows.add("待处理"));
+        sources.forEach(ignored -> rows.add(UiMessages.message("待处理")));
     }
     public List<Source> sources() { return sources; }
     String row(int index) { return rows.get(index); }
@@ -28,15 +30,15 @@ public final class AiBatchState {
     void select(int index) { selectedIndex = index; }
     void start(AiTaskState task, AiOptions options) {
         this.task = task; this.options = options;
-        for (int i = 0; i < rows.size(); i++) rows.set(i, "待处理");
+        for (int i = 0; i < rows.size(); i++) rows.set(i, UiMessages.message("待处理"));
     }
     void refreshSources(List<Source> sources) {
         if (!running() && sameScope(sources)) this.sources = List.copyOf(sources);
     }
     void finishRows() {
         for (int i = 0; i < rows.size(); i++) {
-            if (rows.get(i).equals("处理中")) rows.set(i, task.outcome() == AiTaskState.Outcome.FAILED ? "失败" : "已取消");
-            else if (rows.get(i).equals("待处理")) rows.set(i, "未处理");
+            if (rows.get(i).equals(UiMessages.message("处理中"))) rows.set(i, task.outcome() == AiTaskState.Outcome.FAILED ? UiMessages.message("失败") : UiMessages.message("已取消"));
+            else if (rows.get(i).equals(UiMessages.message("待处理"))) rows.set(i, UiMessages.message("未处理"));
         }
     }
     boolean sameScope(List<Source> candidates) {

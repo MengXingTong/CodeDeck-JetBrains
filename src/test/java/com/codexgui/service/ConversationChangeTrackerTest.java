@@ -21,6 +21,79 @@ final class ConversationChangeTrackerTest {
     @TempDir
     Path root;
 
+    @Test void resolvesGitRevertFilesInThePluginRuntime() throws Exception {
+        var repository = Files.createDirectories(root.resolve("repo"));
+        for (var args : List.of(List.of("init", "--quiet"), List.of("config", "user.name", "Test"),
+            List.of("config", "user.email", "test@example.invalid"), List.of("config", "core.autocrlf", "false"))) git(repository, args);
+        var path = Files.writeString(repository.resolve("file.cpp"), "base\n");
+        git(repository, List.of("add", ".")); git(repository, List.of("commit", "--quiet", "-m", "base"));
+        Files.writeString(path, "before\r\n");
+        git(repository, List.of("add", ".")); git(repository, List.of("commit", "--quiet", "-m", "change"));
+        var capture = new CommandFileCapture(root);
+        capture.started("git", List.of(new ShellCommandInput("git -C repo revert --no-edit HEAD", root.toString())));
+        assertEquals(List.of(path), capture.snapshot("git").stream().map(CommandFileCapture.Before::path).toList());
+        git(repository, List.of("revert", "--no-edit", "HEAD"));
+        assertEquals(List.of(path), capture.completed("git").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    private void git(Path repository, List<String> args) throws Exception {
+        var command = new ArrayList<>(List.of("git", "-c", "core.fsmonitor=false", "-c", "commit.gpgsign=false", "-C", repository.toString()));
+        command.addAll(args);
+        var output = root.resolve("git-test-output");
+        var process = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile()).start();
+        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(0, process.exitValue(), Files.readString(output));
+    }
+
+    @Test void restoresP4ReadOnlyFilesAndKeepsRepositoryLineEndings() throws Exception {
+        var path = write("file.cpp", "before\r\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "p4", "p4 revert file.cpp", root.toString());
+        Files.writeString(path, "repository\n");
+        var dos = Files.getFileAttributeView(path, java.nio.file.attribute.DosFileAttributeView.class);
+        if (dos != null) dos.setReadOnly(true);
+        try {
+            tracker.commandCompleted("session", "p4");
+            assertEquals("repository\n", Files.readString(path));
+            tracker.revertAll("session");
+            assertEquals("before\r\n", Files.readString(path));
+            assertTrue(tracker.listSummaries("session").isEmpty());
+        } finally { if (dos != null) dos.setReadOnly(false); }
+    }
+
+    @Test void revertingReadOnlyAdditionsRemovesThemWithoutUnlockingUnchangedFiles() throws Exception {
+        var untouched = write("untouched.cpp", "user\n");
+        var added = root.resolve("restored.cpp");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "p4", "p4 revert restored.cpp untouched.cpp", root.toString());
+        Files.writeString(added, "restored\n");
+        var dos = Files.getFileAttributeView(untouched, java.nio.file.attribute.DosFileAttributeView.class);
+        var addedDos = Files.getFileAttributeView(added, java.nio.file.attribute.DosFileAttributeView.class);
+        if (dos != null) dos.setReadOnly(true);
+        if (addedDos != null) addedDos.setReadOnly(true);
+        try {
+            tracker.revertAll("session");
+            tracker.commandCompleted("session", "p4");
+            assertFalse(Files.exists(added));
+            assertEquals("user\n", Files.readString(untouched));
+            if (dos != null) assertTrue(dos.readAttributes().isReadOnly());
+        } finally { if (dos != null) dos.setReadOnly(false); }
+    }
+
+    @Test void earliestRawSnapshotWinsAgainstLateStructuredStartsAndProviderDiffs() throws Exception {
+        var path = write("file.cpp", "first\r\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandsStarted("session", "raw", List.of(new ShellCommandInput("Set-Content file.cpp second", root.toString())));
+        Files.writeString(path, "second\n");
+        tracker.commandStarted("session", "structured", "Set-Content file.cpp second", root.toString());
+        tracker.commandCompleted("session", "structured");
+        tracker.commandCompleted("session", "raw");
+        assertArrayEquals(bytes("first\r\n"), tracker.readDetails("session", path).beforeContent());
+        assertEquals("second\r\n", Files.readString(path));
+        tracker.revertAll("session");
+        assertEquals("first\r\n", Files.readString(path));
+    }
+
     @Test
     void firstTouchOwnsBaselineAcrossProviderAndUserEdits() throws IOException {
         var path = write("file.txt", "original\n");

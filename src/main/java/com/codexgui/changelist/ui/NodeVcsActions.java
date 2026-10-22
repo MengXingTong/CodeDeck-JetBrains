@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ui;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.history.LocalHistory;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
@@ -50,7 +52,7 @@ final class NodeVcsActions {
             if (after != null) paths.add(Path.of(after.getFile().getPath()).normalize());
         }
         if (paths.stream().anyMatch(path -> !scope.contains(path))) {
-            throw new IllegalArgumentException("已跳过项目目录外的文件或移动来源");
+            throw new IllegalArgumentException(UiMessages.message("已跳过项目目录外的文件或移动来源"));
         }
         return List.copyOf(paths);
     }
@@ -71,11 +73,11 @@ final class NodeVcsActions {
         List<SavedDocument> saved = new ArrayList<>();
         if (operation == FileVcsOperations.Operation.REVERT) {
             String detail = file.kind() == ChangedFile.Kind.ADDED
-                    ? "撤销新增登记，保留本地文件。" : "将文件恢复到工作区基准版本，丢弃本地修改（含未保存内容）。";
-            if (paths.size() > 1) detail += "\n移动或重命名的两个路径会一并还原。";
+                    ? UiMessages.message("撤销新增登记，保留本地文件。") : UiMessages.message("将文件恢复到工作区基准版本，丢弃本地修改（含未保存内容）。");
+            if (paths.size() > 1) detail += UiMessages.message("\n移动或重命名的两个路径会一并还原。");
             if (Messages.showOkCancelDialog(project, detail + "\n\n"
                             + String.join("\n", paths.stream().map(Path::toString).toList()), operation.label(),
-                    "撤销修改", "取消", Messages.getWarningIcon()) != Messages.OK) { done.run(); return; }
+                    UiMessages.message("撤销修改"), UiMessages.message("取消"), Messages.getWarningIcon()) != Messages.OK) { done.run(); return; }
             // Save only these documents, so Local History also contains their unsaved edits.
             var documents = FileDocumentManager.getInstance();
             for (Path path : paths) {
@@ -84,25 +86,25 @@ final class NodeVcsActions {
                 if (document == null) continue;
                 if (documents.isDocumentUnsaved(document)) documents.saveDocument(document);
                 if (documents.isDocumentUnsaved(document)) {
-                    status.accept("无法保存当前文件，已取消撤销修改"); done.run(); return;
+                    status.accept(UiMessages.message("无法保存当前文件，已取消撤销修改")); done.run(); return;
                 }
                 saved.add(new SavedDocument(document, document.getModificationStamp()));
             }
-            LocalHistory.getInstance().putSystemLabel(project, "撤销修改前：" + file.path().getFileName());
+            LocalHistory.getInstance().putSystemLabel(project, UiMessages.message("撤销修改前：") + file.path().getFileName());
         }
-        status.accept("正在" + operation.label() + "：" + file.path().getFileName());
+        status.accept(UiMessages.message("正在") + operation.label() + "：" + file.path().getFileName());
         new Task.Backgroundable(project, operation.label(), false) {
             private FileVcsOperations.Result result;
             @Override public void run(@NotNull ProgressIndicator indicator) {
                 if (expired.getAsBoolean()) return;
                 var history = operation == FileVcsOperations.Operation.REVERT
-                        ? LocalHistory.getInstance().startAction("撤销修改") : null;
+                        ? LocalHistory.getInstance().startAction(UiMessages.message("撤销修改")) : null;
                 try { result = project.getService(FileVcsOperations.class).perform(operation, paths, () -> {
                     if (expired.getAsBoolean()) throw new com.intellij.openapi.progress.ProcessCanceledException();
                     if (ReadAction.nonBlocking(() -> saved.stream().anyMatch(item ->
                             item.document().getModificationStamp() != item.stamp()))
                             .expireWith(project).executeSynchronously()) {
-                        throw new IllegalStateException("等待服务器期间文件又有新编辑，已取消撤销修改，请重试");
+                        throw new IllegalStateException(UiMessages.message("等待服务器期间文件又有新编辑，已取消撤销修改，请重试"));
                     }
                 }); }
                 catch (com.intellij.openapi.vcs.VcsException error) { throw new IllegalStateException(error.getMessage(), error); }
@@ -115,12 +117,12 @@ final class NodeVcsActions {
             }
             @Override public void onSuccess() {
                 if (!expired.getAsBoolean()) status.accept(operation == FileVcsOperations.Operation.CANCEL_CHECKOUT
-                        ? "已取消迁出，保留本地修改" : "已" + operation.label());
+                        ? UiMessages.message("已取消迁出，保留本地修改") : UiMessages.message("已") + operation.label());
             }
             @Override public void onThrowable(@NotNull Throwable error) {
                 if (!expired.getAsBoolean()) {
-                    status.accept(operation.label() + "失败：" + error.getMessage());
-                    Messages.showErrorDialog(project, error.getMessage(), operation.label() + "失败");
+                    status.accept(operation.label() + UiMessages.message("失败：") + error.getMessage());
+                    Messages.showErrorDialog(project, error.getMessage(), operation.label() + UiMessages.message("失败"));
                 }
             }
             @Override public void onFinished() {

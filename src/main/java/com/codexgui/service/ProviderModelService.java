@@ -1,5 +1,7 @@
 package com.codexgui.service;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.settings.CodexSettingsState;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -56,7 +58,7 @@ public final class ProviderModelService {
         try {
             return new URI(base.getScheme(), base.getUserInfo(), base.getHost(), base.getPort(), path, null, null);
         } catch (URISyntaxException error) {
-            throw new IllegalArgumentException("供应商模型接口地址无效", error);
+            throw new IllegalArgumentException(UiMessages.message("供应商模型接口地址无效"), error);
         }
     }
 
@@ -88,7 +90,7 @@ public final class ProviderModelService {
         Set<URI> visitedPages
     ) {
         if (!visitedPages.add(endpoint)) {
-            return CompletableFuture.failedFuture(new IOException("供应商模型接口返回了重复分页地址"));
+            return CompletableFuture.failedFuture(new IOException(UiMessages.message("供应商模型接口返回了重复分页地址")));
         }
         return client.sendAsync(request(provider, apiKey, endpoint), HttpResponse.BodyHandlers.ofString())
             .thenCompose(response -> {
@@ -99,7 +101,7 @@ public final class ProviderModelService {
                     return listModels(provider, apiKey, nextPage, models, visitedPages);
                 }
                 if (models.isEmpty()) {
-                    return CompletableFuture.failedFuture(new IOException("供应商模型接口未返回可用模型"));
+                    return CompletableFuture.failedFuture(new IOException(UiMessages.message("供应商模型接口未返回可用模型")));
                 }
                 return CompletableFuture.completedFuture(new ArrayList<>(models));
             });
@@ -113,7 +115,7 @@ public final class ProviderModelService {
         var builder = HttpRequest.newBuilder(endpoint)
             .timeout(REQUEST_TIMEOUT)
             .header("Accept", "application/json")
-            .header("User-Agent", "CodeDeck/2.1.0")
+            .header("User-Agent", "CodeDeck/2.1.1")
             .GET();
 
         // 两类渠道沿用各自 CLI 的认证约定，避免模型请求与实际会话使用不同凭据。
@@ -128,7 +130,7 @@ public final class ProviderModelService {
 
     private static List<String> parseResponse(int statusCode, String body) {
         if (statusCode < 200 || statusCode >= 300) {
-            throw new CompletionException(new IOException("供应商模型接口返回 HTTP " + statusCode));
+            throw new CompletionException(new IOException(UiMessages.message("供应商模型接口返回 HTTP ") + statusCode));
         }
         try {
             return parseModels(body);
@@ -171,7 +173,7 @@ public final class ProviderModelService {
             if (queryStart >= 0) source = source.substring(0, queryStart);
             return URI.create(source + "?" + String.join("&", pairs));
         } catch (RuntimeException error) {
-            throw new IllegalArgumentException("供应商模型分页地址无效", error);
+            throw new IllegalArgumentException(UiMessages.message("供应商模型分页地址无效"), error);
         }
     }
 

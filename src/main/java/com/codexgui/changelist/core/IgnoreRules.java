@@ -1,5 +1,7 @@
 package com.codexgui.changelist.core;
 
+import com.codexgui.i18n.UiMessages;
+
 import org.eclipse.jgit.ignore.FastIgnoreRule;
 
 import java.nio.file.InvalidPathException;
@@ -98,7 +100,7 @@ public final class IgnoreRules {
     }
 
     public static String literalPath(ProjectScope scope, Path path, boolean directory) {
-        if (!scope.contains(path)) throw new IllegalArgumentException("只能忽略当前项目内的文件或目录");
+        if (!scope.contains(path)) throw new IllegalArgumentException(UiMessages.message("只能忽略当前项目内的文件或目录"));
         return scope.root().relativize(path.normalize()).toString().replace('\\', '/') + (directory ? "/" : "");
     }
 }

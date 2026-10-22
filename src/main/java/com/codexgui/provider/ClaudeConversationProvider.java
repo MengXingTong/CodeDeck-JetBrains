@@ -1,5 +1,7 @@
 package com.codexgui.provider;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.conversation.TurnHandle;
 import com.codexgui.service.ClaudeCodeService;
 import com.google.gson.Gson;
@@ -75,7 +77,7 @@ public final class ClaudeConversationProvider implements ConversationProvider {
 
     @Override
     public ProviderHealth health() {
-        return new ProviderHealth(ProviderHealth.Status.READY, "Claude Code 由项目配置决定可用性");
+        return new ProviderHealth(ProviderHealth.Status.READY, UiMessages.message("Claude Code 由项目配置决定可用性"));
     }
 
     @Override public Set<ProviderCapability> capabilities() { return Set.of(); }

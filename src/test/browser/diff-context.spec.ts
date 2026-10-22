@@ -19,3 +19,48 @@ test('Diff 选区显示原版本行号，切换普通文件时清除版本标签
   await page.evaluate(() => CodexGui.receive(previewEnvelope('fileContext', {path: '', startLine: 0, endLine: 0})));
   await expect(fileContext).toHaveCount(0);
 });
+
+test('新建页签后，前一页签发出的当前文件更新立即显示', async ({page}) => {
+  await page.goto('/tools/ui-preview.html');
+  await expect(page.getByRole('textbox', {name: '消息'})).toBeVisible();
+  await page.locator('[data-action="newTab"]').click();
+  await page.getByRole('textbox', {name: '消息'}).fill('新页签草稿');
+  const activeTab = page.locator('[data-session-tab].active');
+  const sessionId = await activeTab.getAttribute('data-session-tab');
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('fileContext', {
+    path: 'Source/LevelPreviewerUIController.cpp', startLine: 7, endLine: 9,
+  })));
+  const context = page.locator('.context-item:has([data-action="clearFileContext"])');
+  await expect(context.locator('.context-text')).toHaveText('LevelPreviewerUIController.cpp · L7-L9');
+  await expect(page.getByRole('textbox', {name: '消息'})).toHaveText('新页签草稿');
+  await expect(activeTab).toHaveAttribute('data-session-tab', sessionId!);
+  await page.locator('[data-close-session="default"]').click();
+  // IDE 文件上下文属于整个工作区；已关闭页签发出的迟到更新也不能被丢弃。
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('fileContext', {
+    path: 'Source/Other.cpp', startLine: 0, endLine: 0,
+  })));
+  await expect(context.locator('.context-text')).toHaveText('Other.cpp');
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('fileContext', {
+    path: '', startLine: 0, endLine: 0,
+  })));
+  await expect(context).toHaveCount(0);
+});
+
+test('当前文件和 Diff 选区跨新建、切换页签保留，草稿相互独立', async ({page}) => {
+  await page.goto('/tools/ui-preview.html?context');
+  const editor = page.getByRole('textbox', {name: '消息'});
+  await expect(editor).toBeVisible();
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('fileContext', {
+    path: 'Source/LevelPreviewerUIController.cpp', startLine: 0, endLine: 0,
+    selectionLabel: 'before:L2-L3, after:L2-L4',
+  })));
+  await editor.fill('原页签草稿');
+  await page.locator('[data-action="newTab"]').click();
+  const context = page.locator('.context-item:has([data-action="clearFileContext"]) .context-text');
+  await expect(context).toHaveText('LevelPreviewerUIController.cpp · before:L2-L3, after:L2-L4');
+  await expect(editor).toBeEmpty();
+  await editor.fill('新页签草稿');
+  await page.locator('[data-session-tab="default"]').click();
+  await expect(editor).toHaveText('原页签草稿');
+  await expect(context).toHaveText('LevelPreviewerUIController.cpp · before:L2-L3, after:L2-L4');
+});

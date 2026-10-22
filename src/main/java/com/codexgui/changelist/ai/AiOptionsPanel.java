@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.settings.CodexSettingsState;
 import com.codexgui.service.CodexModelCatalog;
 import com.intellij.openapi.application.ApplicationManager;
@@ -15,10 +17,10 @@ import java.util.Objects;
 
 /** Each annotation context saves its own inference preferences. Editing never starts a request. */
 public final class AiOptionsPanel extends JPanel {
-    private static final String DEFAULT_MODEL = "CLI 默认模型";
+    private final String defaultModel = UiMessages.message("CLI 默认模型");
     private final JLabel provider = new JLabel();
     private final JComboBox<String> model = new JComboBox<>(), effort = new JComboBox<>();
-    private final JCheckBox fast = new JCheckBox("Fast（更多额度）");
+    private final JCheckBox fast = new JCheckBox(UiMessages.message("Fast（更多额度）"));
     private final CodexSettingsState settings;
     private final CodexSettingsState.AnnotationScope scope;
     private final Runnable settingsChanged;
@@ -41,16 +43,16 @@ public final class AiOptionsPanel extends JPanel {
         this.settings = settings; this.scope = scope; this.catalog = List.copyOf(catalog); this.settingsChanged = settingsChanged;
         model.setEditable(true); model.setPrototypeDisplayValue("gpt-6.1-sol          ");
         model.setName("annotationModel"); effort.setName("annotationEffort"); fast.setName("annotationFast");
-        model.getAccessibleContext().setAccessibleName("AI 注释模型");
-        effort.getAccessibleContext().setAccessibleName("AI 注释思考程度");
-        var context = scope == CodexSettingsState.AnnotationScope.DIFF ? "单文件 Diff 注释" : "批量 AI 注释";
-        model.setToolTipText(context + "独立保存模型；可从本地缓存选择或手动输入完整模型 ID");
-        effort.setToolTipText(context + "独立保存思考程度，不随聊天设置变化");
-        fast.setToolTipText(context + "独立保存 Fast；修改只影响后续请求");
-        provider.setToolTipText("供应商和 CLI 路径在 CodeDeck 中管理");
+        model.getAccessibleContext().setAccessibleName(UiMessages.message("AI 注释模型"));
+        effort.getAccessibleContext().setAccessibleName(UiMessages.message("AI 注释思考程度"));
+        var context = scope == CodexSettingsState.AnnotationScope.DIFF ? UiMessages.message("单文件 Diff 注释") : UiMessages.message("批量 AI 注释");
+        model.setToolTipText(context + UiMessages.message("独立保存模型；可从本地缓存选择或手动输入完整模型 ID"));
+        effort.setToolTipText(context + UiMessages.message("独立保存思考程度，不随聊天设置变化"));
+        fast.setToolTipText(context + UiMessages.message("独立保存 Fast；修改只影响后续请求"));
+        provider.setToolTipText(UiMessages.message("供应商和 CLI 路径在 CodeDeck 中管理"));
         Arrays.stream(CodexSettingsState.ReasoningEffort.values()).map(CodexSettingsState.ReasoningEffort::value)
                 .forEach(effort::addItem);
-        add(provider); add(new JLabel("模型:")); add(model); add(new JLabel("思考:")); add(effort); add(fast);
+        add(provider); add(new JLabel(UiMessages.message("模型:"))); add(model); add(new JLabel(UiMessages.message("思考:"))); add(effort); add(fast);
         model.addActionListener(e -> save()); effort.addActionListener(e -> save()); fast.addActionListener(e -> save());
         model.getEditor().getEditorComponent().addFocusListener(new FocusAdapter() {
             @Override public void focusLost(FocusEvent event) { save(); }
@@ -67,7 +69,7 @@ public final class AiOptionsPanel extends JPanel {
     }
     private String selectedModel() {
         String value = Objects.toString(model.getEditor().getItem(), "").strip();
-        return DEFAULT_MODEL.equals(value) ? "" : value;
+        return defaultModel.equals(value) ? "" : value;
     }
     private void save() {
         if (adjusting || displayed == null || frozen != null || !model.isEnabled()) return;
@@ -94,16 +96,17 @@ public final class AiOptionsPanel extends JPanel {
         displayed = next;
         adjusting = true;
         try {
-            var models = new LinkedHashSet<String>(); models.add(DEFAULT_MODEL);
+            var models = new LinkedHashSet<String>(); models.add(defaultModel);
             var profile = settings.provider(next.provider().id());
             if (profile != null) models.addAll(profile.customModels);
             models.addAll(settings.annotationModel(scope).customModels);
             if (next.provider().builtIn()) models.addAll(catalog);
             if (!next.model().isBlank()) models.add(next.model());
             model.removeAllItems(); models.forEach(model::addItem);
-            model.setSelectedItem(next.model().isBlank() ? DEFAULT_MODEL : next.model());
+            model.setSelectedItem(next.model().isBlank() ? defaultModel : next.model());
             effort.setSelectedItem(next.effort()); fast.setSelected(next.fast());
-            provider.setText("GPT · " + next.provider().name()); catalogChanged = false;
+            provider.setText("GPT · " + (next.provider().builtIn()
+                ? UiMessages.message("Codex 本地配置") : next.provider().name())); catalogChanged = false;
         } finally { adjusting = false; }
         if (different) changed.run();
     }

@@ -1,5 +1,7 @@
 package com.codexgui.changelist.ai;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.ui.JBColor;
@@ -30,12 +32,12 @@ final class AiAnnotationComponent extends JTextArea {
                 BorderFactory.createMatteBorder(0, JBUI.scale(3), 0, 0, new JBColor(0x4E86BF, 0x72A5D8)),
                 JBUI.Borders.empty(6)));
         setCaretPosition(0);
-        getAccessibleContext().setAccessibleName("变更说明");
+        getAccessibleContext().setAccessibleName(UiMessages.message("变更说明"));
         var menu = new JPopupMenu();
-        var selected = new JMenuItem("复制");
+        var selected = new JMenuItem(UiMessages.message("复制"));
         selected.addActionListener(e -> { if (getSelectedText() != null) copy.accept(getSelectedText()); });
-        var all = new JMenuItem("复制全部"); all.addActionListener(e -> copy.accept(getText()));
-        var selectAll = new JMenuItem("全选");
+        var all = new JMenuItem(UiMessages.message("复制全部")); all.addActionListener(e -> copy.accept(getText()));
+        var selectAll = new JMenuItem(UiMessages.message("全选"));
         selectAll.addActionListener(e -> { requestFocusInWindow(); selectAll(); });
         menu.add(selected); menu.add(all); menu.addSeparator(); menu.add(selectAll);
         menu.addPopupMenuListener(new PopupMenuListener() {

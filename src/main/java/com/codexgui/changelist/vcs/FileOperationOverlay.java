@@ -1,5 +1,7 @@
 package com.codexgui.changelist.vcs;
 
+import com.codexgui.i18n.UiMessages;
+
 import com.codexgui.changelist.core.ChangeTree;
 import com.codexgui.changelist.core.ChangedFile;
 import com.codexgui.changelist.core.ProjectScope;
@@ -42,7 +44,7 @@ public final class FileOperationOverlay {
             if (previous == null || (previous.update().target() != null && previous.update().target().opened())) continue;
             var entry = current.get(path.normalize());
             var update = new FileVcsOperations.Update(path, entry == null ? null : entry.kind(),
-                    entry != null && entry.binary(), entry == null ? null : entry.target(), "local", "本地变更");
+                    entry != null && entry.binary(), entry == null ? null : entry.target(), "local", UiMessages.message("本地变更"));
             next.put(path.normalize(), new Pending(update, previous.nativeVersion()));
         }
         if (next.equals(pending)) return;

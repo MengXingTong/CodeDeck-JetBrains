@@ -11,6 +11,8 @@ import com.intellij.ide.dnd.DnDManager;
 import com.intellij.ide.dnd.DnDManagerImpl;
 import com.intellij.ide.dnd.DnDNativeTarget;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.fileEditor.impl.text.FileEditorDropHandler;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.serviceContainer.ComponentManagerImpl;
 import com.intellij.util.ThrowableRunnable;
@@ -45,11 +47,27 @@ class WorkspaceDropIntegrationTest {
         Class.forName("com.intellij.testFramework.TestApplicationManager").getMethod("getInstance").invoke(null);
         Class.forName("com.intellij.testFramework.EdtTestUtil").getMethod("runInEdtAndWait", ThrowableRunnable.class)
             .invoke(null, (ThrowableRunnable<Exception>) () -> {
-                for (var name : List.of("文件 with space.cpp", "Deleted.cpp", "preview.png")) {
+                for (var name : List.of("文件 with space.cpp", "Deleted.cpp", "preview.png", "目录 with space")) {
                     var path = root.resolve(name);
                     boolean deleted = name.equals("Deleted.cpp");
-                    if (!deleted) Files.writeString(path, "original");
+                    boolean directory = name.startsWith("目录");
+                    if (directory) Files.createDirectory(path);
+                    else if (!deleted) Files.writeString(path, "original");
                     var payload = changeListTransfer(path, deleted);
+                    assertNotNull(payload);
+                    var factory = EditorFactory.getInstance();
+                    var codeEditor = factory.createEditor(factory.createDocument("source code\n"));
+                    try {
+                        var flavors = payload.getTransferDataFlavors();
+                        assertFalse(new FileEditorDropHandler(codeEditor).canHandleDrop(flavors),
+                            "ChangeList paths must not open in the central editor");
+                        assertFalse(codeEditor.getContentComponent().getTransferHandler()
+                            .canImport(codeEditor.getContentComponent(), flavors),
+                            "ChangeList paths must not insert text into source code");
+                        assertEquals("source code\n", codeEditor.getDocument().getText());
+                    } finally {
+                        factory.releaseEditor(codeEditor);
+                    }
                     var session = new ConversationSession(new SessionId("drop-test"));
                     var listener = new DropListener();
                     var input = new WorkspaceInputCoordinator(null, null, null, root, () -> session, listener);
@@ -87,13 +105,15 @@ class WorkspaceDropIntegrationTest {
                             assertTrue(session.fileReferences().isEmpty());
                         } else {
                             assertEquals(List.of(path), session.fileReferences().stream().map(item -> item.path()).toList());
+                            assertEquals(directory, session.fileReferences().getFirst().directory());
                             assertTrue(session.attachments().isEmpty());
                         }
                         // Repeated drops cannot duplicate references or attachments, or alter source files.
                         assertTrue(((DnDDropHandler.WithResult) handler).tryDrop(inside));
                         assertEquals(1, session.fileReferences().size() + session.attachments().size());
                         assertEquals(!deleted, Files.exists(path));
-                        if (!deleted) assertEquals("original", Files.readString(path));
+                        if (!deleted && !directory) assertEquals("original", Files.readString(path));
+                        if (directory) assertTrue(Files.isDirectory(path));
                     } finally {
                         manager.getDropTargetListener().dragExit(new DropTargetEvent(target.getDropTarget().getDropTargetContext()));
                         Disposer.dispose(parent);
@@ -105,8 +125,10 @@ class WorkspaceDropIntegrationTest {
     }
 
     private Transferable changeListTransfer(Path path, boolean deleted) throws Exception {
-        var file = new ChangedFile("file", path, deleted ? ChangedFile.Kind.DELETED : ChangedFile.Kind.MODIFIED, false);
-        var node = new DefaultMutableTreeNode(new ChangeTree.Node("file/id", path.getFileName().toString(), file, path, List.of()));
+        var directory = Files.isDirectory(path);
+        var file = directory ? null : new ChangedFile("file", path, deleted ? ChangedFile.Kind.DELETED : ChangedFile.Kind.MODIFIED, false);
+        var node = new DefaultMutableTreeNode(new ChangeTree.Node(directory ? "group/id/dir/src" : "file/id",
+            path.getFileName().toString(), file, path, List.of()));
         var tree = new JTree(node);
         tree.setSelectionPath(new TreePath(node));
         var type = Class.forName("com.codexgui.changelist.ui.ChangeListFileTransferHandler");
