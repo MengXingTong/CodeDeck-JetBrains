@@ -1,4 +1,4 @@
-package com.codexgui.changelist.ai;
+package com.codexgui.service;
 
 import com.google.gson.JsonParser;
 import java.nio.file.Files;
@@ -7,12 +7,17 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /** Optional suggestions from the same local CLI cache; never starts a process or model request. */
-final class AiModelCatalog {
-    private AiModelCatalog() {}
-    static List<String> load() {
+public final class CodexModelCatalog {
+    private CodexModelCatalog() {}
+    public static List<String> load() {
         try {
             String home = System.getenv("CODEX_HOME");
             Path directory = home == null || home.isBlank() ? Path.of(System.getProperty("user.home"), ".codex") : Path.of(home);
+            return load(directory);
+        } catch (Exception ignored) { return List.of(); }
+    }
+    static List<String> load(Path directory) {
+        try {
             Path file = directory.resolve("models_cache.json");
             if (!Files.isRegularFile(file) || Files.size(file) > 4 * 1024 * 1024) return List.of();
             return parse(Files.readString(file));

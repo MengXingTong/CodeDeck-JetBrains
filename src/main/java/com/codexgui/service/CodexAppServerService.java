@@ -198,7 +198,7 @@ public final class CodexAppServerService implements Disposable {
             var clientInfo = new JsonObject();
             clientInfo.addProperty("name", "codedeck-jetbrains");
             clientInfo.addProperty("title", "CodeDeck for JetBrains");
-            clientInfo.addProperty("version", "2.0");
+            clientInfo.addProperty("version", "2.1.0");
             var params = new JsonObject();
             params.add("clientInfo", clientInfo);
             params.add("capabilities", capabilities);
@@ -380,6 +380,7 @@ public final class CodexAppServerService implements Disposable {
         params.addProperty("sandbox", sandbox);
         params.addProperty("ephemeral", false);
         params.addProperty("threadSource", "codedeck");
+        params.addProperty("experimentalRawEvents", true);
         // 只传递用户在插件设置中明确保存的指令，不注入第三方增强提示词。
         if (developerInstructions != null && !developerInstructions.isBlank()) {
             params.addProperty("developerInstructions", developerInstructions);

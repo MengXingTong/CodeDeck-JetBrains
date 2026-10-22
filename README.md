@@ -1,6 +1,6 @@
 # CodeDeck
 
-** AI时代的Review神器 For JetBrains。**
+**AI时代的Review神器 For JetBrains。**
 
 CodeDeck 把变更列表、原生 Diff、AI 讲解和对话放在同一个 IDE 里。无论代码是你写的、同事写的，还是 AI 刚改的，都能对着代码看变化、问原因，再决定留下哪些修改。
 
@@ -10,8 +10,10 @@ CodeDeck 把变更列表、原生 Diff、AI 讲解和对话放在同一个 IDE �
 - **选中代码，接着问。** 在 Diff 中选一段代码，就能追问逻辑、讨论边界条件，或者让 AI 补测试。文件、行号和选区会一起带过去。
 - **集中审阅项目改动。** 用变更树查看 Git / Perforce 等版本控制中的修改，双击就进 IDE 原生 Diff；也可以批量生成 AI 注释。
 - **逐项确认 AI 写的代码。** 每个对话都有自己的修改列表，支持查看差异、接受和撤销，不用靠聊天回复猜它到底动了哪些文件。
+- **防止 AI 修改代码时混淆 LF/CRLF 换行。** 默认保持已捕获文件原有的 LF / CRLF 和 UTF-8 BOM，保留代码改动，减少整文件格式变化造成的无效 Diff；需要主动统一换行时，可在行为设置关闭保护。
 - **把文件直接拖进聊天。** 从变更树或项目树拖入文件，也可以用 `@` 搜索引用；图片可直接作为附件发送。
 - **几个任务同时做。** 多个对话页签独立运行，支持排队发送；Codex 还可以在执行过程中接收新的引导。
+  启动过程中也可点击“停止”；主动关闭单个运行页签会取消该回合，最后一个页签关闭后会自动打开空白页签。批量关闭仍保留其他运行中的任务。发送准备失败会显示错误并恢复可操作状态，不会一直停在“正在生成响应”。
 - **沿用你自己的 AI 配置。** 接入 Codex / Claude Code CLI，也支持自定义供应商、模型、提示词、Agent 身份，以及 Codex 的 Skills 和 MCP。
 
 ## 看起来是什么样
@@ -38,14 +40,14 @@ CodeDeck 把变更列表、原生 Diff、AI 讲解和对话放在同一个 IDE �
 
 ## 装好后，从一次 Review 开始
 
-1. **安装插件 ZIP。** 当前版本为 `2.0`，尚未上架 Marketplace。在 IDE 的 **Settings → Plugins → 齿轮 → Install Plugin from Disk** 中选择 `CodeDeck-2.0.zip`，然后重启 IDE。
+1. **安装插件 ZIP。** 当前版本为 `2.1.0`，尚未上架 Marketplace。在 IDE 的 **Settings → Plugins → 齿轮 → Install Plugin from Disk** 中选择 `CodeDeck-2.1.0.zip`，然后重启 IDE。
 2. **连接 CLI。** 先确保本机 `codex` 或 `claude` 已安装并能正常使用。需要指定可执行文件时，打开 **Settings → Tools → CodeDeck** 填写路径。
 3. **打开变更。** 在 **View → Tool Windows → CodeDeck Changes** 中找到文件，双击打开 Diff，点击上方的 **AI 注释**。
 4. **带着问题继续。** 打开右侧 **CodeDeck**，开启“文件上下文”，在 Diff 里选中代码，再提问。让 AI 修改后，从对话的修改列表继续检查、接受或撤销。
 
 可以从这些问题开始：
 
-> 这次修改解决了什么问题？有没有漏掉的边界条件？
+> 这次修改解决了什么问题？
 >
 > 这个判断为什么要放在这里？用一个具体输入说明。
 >
@@ -55,9 +57,9 @@ CodeDeck 把变更列表、原生 Diff、AI 讲解和对话放在同一个 IDE �
 
 - **JetBrains IDE 2024.3 或更新版本**，使用支持 JCEF 的运行时。
 - **Codex CLI 或 Claude Code CLI**，以及你自己的模型服务配置；插件不附带 CLI、模型额度或账号。
-- 使用 Claude 渠道时，需要 **Claude Code 2.1.210+**。Claude 渠道仍在完善，当前建议优先使用 Codex。
+- 使用 Claude 渠道时，需要 **Claude Code 2.1.210+**。由于 Claude 使用受限，相关功能测试较少，Claude 渠道仍在完善，当前建议优先使用 Codex。
 
-AI 注释使用 **Codex / GPT 渠道**的当前供应商和模型，独立运行，不会把注释请求塞进聊天历史。Git / Perforce 连接沿用 IDE 的现有配置。
+AI 注释使用 **Codex / GPT 渠道**的当前供应商。单文件 Diff 注释、ChangeList 批量注释和聊天分别保存模型、思考程度与 Fast，互不覆盖；升级时注释配置会继承一次原有设置。注释独立运行，不会把请求塞进聊天历史。Git / Perforce 连接沿用 IDE 的现有配置。
 
 ## 供应商和常用设置
 
@@ -73,7 +75,9 @@ AI 注释使用 **Codex / GPT 渠道**的当前供应商和模型，独立运行
 
 自定义 GPT 接口支持 Responses API / Chat Completions API。认证凭据保存在 **JetBrains PasswordSafe**。修改供应商配置后，请开启新对话。
 
-修改捕获和撤销有文件大小与工具范围限制；详细说明见 [功能、配置与已知边界](docs/usage-details.md)。从独立 ChangeList 插件迁移时，请先禁用旧的 **VCS Changelist Sidebar**。
+使用 Codex 本地配置时，聊天框与 Diff 的模型选择器共用本机 CLI 模型缓存，连接就绪后聊天框会刷新可用模型；新建页签也会加载当前渠道的模型列表。
+
+Codex 的新增文件、修改、删除和补丁移动都可进入对话修改列表；命令中明确指定的小型子目录和脚本所在目录也支持路径拼接与批量文件操作。默认保持已捕获文件原有的 LF / CRLF 和 UTF-8 BOM；需要主动转换格式时，可在“设置 → 基础配置 → 行为”关闭“保持已有文件换行”。撤销直接恢复原始字节并刷新编辑器，支持 Windows 换行。重新打开历史时会从已完成的文件事件恢复可识别的修改。修改捕获经过独立项目中的真实模型操作验收，仍受文件大小与目录范围限制；详细说明见 [功能、配置与已知边界](docs/usage-details.md)。从独立 ChangeList 插件迁移时，请先禁用旧的 **VCS Changelist Sidebar**。
 
 ## 从源码构建
 
@@ -83,7 +87,7 @@ AI 注释使用 **Codex / GPT 渠道**的当前供应商和模型，独立运行
 ./gradlew check buildPlugin
 ```
 
-Windows 使用 `gradlew.bat`。产物为 `build/distributions/CodeDeck-2.0.zip`；开发运行使用 `./gradlew runIde`。
+Windows 使用 `gradlew.bat`。产物为 `build/distributions/CodeDeck-2.1.0.zip`；开发运行使用 `./gradlew runIde`。
 
 本仓库只维护 JetBrains 插件。测试、兼容性验证和工程说明见 [开发文档](docs/development.md)，版本变化见 [CHANGELOG](CHANGELOG.md)。
 

@@ -283,8 +283,6 @@ final class CodexToolWindowController implements Disposable {
         workspaceInput.install(this);
 
         changeService.addListener(changeListener);
-        ApplicationManager.getApplication().getMessageBus().connect(this)
-            .subscribe(CodexSettingsState.GPT_OPTIONS_CHANGED, this::publishSettings);
         project.getMessageBus().connect(this).subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             new FileEditorManagerListener() {

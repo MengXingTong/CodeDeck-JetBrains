@@ -337,6 +337,7 @@ final class BridgeEventPresenter {
         state.addProperty("permissionDialogTimeoutSeconds", settings.permissionDialogTimeoutSeconds);
         state.addProperty("sendOpenedFilePath", settings.sendOpenedFilePath);
         state.addProperty("diffExpandedByDefault", settings.diffExpandedByDefault);
+        state.addProperty("preserveFileLineEndings", settings.preserveFileLineEndings);
         state.addProperty("newSessionConfirmEnabled", settings.newSessionConfirmEnabled);
         state.addProperty("askUserQuestionNotificationEnabled", settings.askUserQuestionNotificationEnabled);
         state.addProperty("askUserQuestionSoundEnabled", settings.askUserQuestionSoundEnabled);

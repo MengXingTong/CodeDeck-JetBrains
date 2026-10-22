@@ -15,6 +15,49 @@ async function captureRequests(page: Page) {
   });
 }
 
+test('默认保持已有文件换行，可关闭后进行主动格式转换', async ({page}) => {
+  await page.goto('/tools/ui-preview.html');
+  await captureRequests(page);
+  await page.locator('[data-action="settings"]').click();
+  await page.locator('[data-basic-tab="behavior"]').click();
+  const toggle = page.locator('[data-behavior-toggle="preserveFileLineEndings"]');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => (Reflect.get(window, 'historyTestRequests') as {type: string; payload: unknown}[])
+    .filter(item => item.type === 'behaviorSetting').at(-1)?.payload))
+    .toEqual({key: 'preserveFileLineEndings', value: false});
+});
+
+test('启动卡住的页签可以关闭，迟到事件不会复活，最后一页关闭后可继续输入', async ({page}) => {
+  await page.goto('/tools/ui-preview.html');
+  const editor = page.getByRole('textbox', {name: '消息'});
+  await expect(editor).toBeVisible();
+  await captureRequests(page);
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('busy', {busy: true})));
+  await expect(page.getByTitle('停止', {exact: true})).toBeVisible();
+  await page.locator('[data-close-session="default"]').click();
+  await expect(page.locator('[data-session-tab="default"]')).toHaveCount(0);
+  await expect(page.locator('.session-tab')).toHaveCount(1);
+  await expect(page.getByTitle('发送', {exact: true})).toBeVisible();
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('appendMessage', {
+    kind: 'assistant', itemId: 'late', delta: '迟到回复',
+  }, {sessionId: 'default'})));
+  await expect(page.locator('[data-session-tab="default"]')).toHaveCount(0);
+  await expect(page.locator('[data-item-id="late"]')).toHaveCount(0);
+  await editor.fill('恢复后的草稿');
+  await page.locator('[data-action="newTab"]').click();
+  const active = page.locator('.session-tab.active');
+  const activeId = await active.getAttribute('data-session-tab');
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('busy', {busy: true})));
+  await active.locator('[data-close-session]').click();
+  await expect(page.locator('.session-tab')).toHaveCount(1);
+  await expect(editor).toHaveText('恢复后的草稿');
+  const requests = await page.evaluate(() => Reflect.get(window, 'historyTestRequests'));
+  expect(requests.filter((request: any) => request.type === 'closeSession')
+    .map((request: any) => request.sessionId)).toEqual(['default', activeId]);
+});
+
 test('自动改名只更新目标页签，保留前台设置页和两个页签的草稿', async ({page}) => {
   await page.goto('/tools/ui-preview.html');
   const editor = page.getByRole('textbox', {name: '消息'});

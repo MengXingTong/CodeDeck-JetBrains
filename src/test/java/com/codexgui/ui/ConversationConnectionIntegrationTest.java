@@ -120,6 +120,33 @@ class ConversationConnectionIntegrationTest {
                 assertEquals("第一句话的完整回复", session.transcript().getFirst().body());
             });
             assertTrue(checks.await(10, TimeUnit.SECONDS));
+
+            onEdt(() -> {
+                // Reproduce a synchronous settings failure after the local turn becomes busy.
+                settings.getState().globalInstructions = null;
+                var dispatch = ConversationCoordinator.class.getDeclaredMethod("dispatchInput",
+                    com.codexgui.conversation.ConversationSession.class,
+                    com.codexgui.conversation.QueuedInput.class, boolean.class);
+                dispatch.setAccessible(true);
+                dispatch.invoke(coordinator, session,
+                    new com.codexgui.conversation.QueuedInput("保留问题", "保留问题", java.util.List.of(), java.util.List.of()), true);
+                assertFalse(session.busy(), "Synchronous preparation failure must release the UI");
+                assertNull(session.handle());
+                assertNull(session.pendingUserBody());
+                assertEquals(0, session.pendingUserMessageCount());
+                assertEquals(com.codexgui.model.ConversationEntry.Kind.ERROR, session.transcript().getLast().kind());
+                assertTrue(session.transcript().stream().anyMatch(entry -> entry.body().equals("保留问题")));
+                settings.getState().globalInstructions = "";
+
+                // Stop must work even before thread/start or turn/start has returned an ID.
+                session.threadId(null);
+                var pending = sessions.beginTurn(session.id());
+                coordinator.interruptCurrentTurn();
+                assertFalse(session.busy());
+                assertFalse(sessions.isCurrent(pending));
+                assertNull(session.handle());
+                assertFalse(sessions.apply(pending, current -> fail("Late callback revived the cancelled turn")));
+            });
         } finally {
             coordinator.dispose(); claude.dispose(); relay.dispose(); providerSettings.dispose(); tracker.dispose(); codex.dispose();
             onEdt(() -> Disposer.dispose(parent));

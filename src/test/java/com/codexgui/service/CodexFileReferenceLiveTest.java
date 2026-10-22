@@ -54,7 +54,7 @@ final class CodexFileReferenceLiveTest {
                 public void disconnected(String detail) { completed.completeExceptionally(new IllegalStateException(detail)); }
             }, ignored -> {})) {
             processRef.set(rpc);
-            var client = new JsonObject(); client.addProperty("name", "codedeck-reference-smoke"); client.addProperty("version", "2.0");
+            var client = new JsonObject(); client.addProperty("name", "codedeck-reference-smoke"); client.addProperty("version", "2.1.0");
             var init = new JsonObject(); init.add("clientInfo", client);
             var capabilities = new JsonObject(); capabilities.addProperty("experimentalApi", true); init.add("capabilities", capabilities);
             rpc.request("initialize", init).get(25, TimeUnit.SECONDS); rpc.notify("initialized", null);

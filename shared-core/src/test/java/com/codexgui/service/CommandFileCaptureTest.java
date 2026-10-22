@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -86,5 +87,53 @@ class CommandFileCaptureTest {
         capture.started("cmd", "rm a.bin b.bin c.bin d.bin", null);
         for (var name : List.of("a.bin", "b.bin", "c.bin", "d.bin")) Files.delete(root.resolve(name));
         assertEquals(3, capture.completed("cmd").size());
+    }
+
+    @Test void capturesComputedPathsInsideExplicitSmallDirectoriesAndExecutedScripts() throws Exception {
+        var scope = Files.createDirectories(root.resolve("source"));
+        var existing = scope.resolve("modified.txt"); Files.writeString(existing, "before");
+        var deleted = scope.resolve("deleted.txt"); Files.writeString(deleted, "delete before");
+        var outside = root.resolve("user.txt"); Files.writeString(outside, "user before");
+        var capture = new CommandFileCapture(root);
+        capture.started("cmd", "$base = Join-Path (Get-Location) 'source'; Run-Generator $base", null);
+        Files.writeString(existing, "after"); Files.delete(deleted);
+        var added = scope.resolve("LICENSE"); Files.writeString(added, "new");
+        Files.writeString(outside, "user edit");
+        var changes = capture.completed("cmd");
+        assertEquals(Set.of(existing, deleted, added), changes.stream().map(CommandFileCapture.Before::path).collect(java.util.stream.Collectors.toSet()));
+        assertFalse(changes.stream().filter(c -> c.path().equals(added)).findFirst().orElseThrow().exists());
+
+        Files.writeString(scope.resolve("worker.mjs"), "// arbitrary computed output paths");
+        capture.started("script", "node source/worker.mjs", null);
+        Files.writeString(existing, "script after"); Files.writeString(scope.resolve("generated.txt"), "script output");
+        capture.forget(scope.resolve("generated.txt"));
+        assertEquals(List.of(existing), capture.completed("script").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    @Test void renameNewNameResolvesAgainstTheSourceParent() throws Exception {
+        var scope = Files.createDirectories(root.resolve("source"));
+        Files.writeString(scope.resolve("old.txt"), "before");
+        var capture = new CommandFileCapture(root);
+        capture.started("cmd", "Rename-Item -LiteralPath source/old.txt -NewName new.txt", null);
+        Files.move(scope.resolve("old.txt"), scope.resolve("new.txt"));
+        assertEquals(2, capture.completed("cmd").size());
+        var spaced = Files.createDirectories(root.resolve("source folder"));
+        Files.writeString(spaced.resolve("旧 文件.txt"), "before");
+        capture.started("spaced", "Rename-Item -LiteralPath 'source folder/旧 文件.txt' -NewName '新 文件.txt'", null);
+        Files.move(spaced.resolve("旧 文件.txt"), spaced.resolve("新 文件.txt"));
+        assertEquals(2, capture.completed("spaced").size());
+        capture.started("cmd-ren", "cmd /c ren \"source folder/新 文件.txt\" final.txt", null);
+        Files.move(spaced.resolve("新 文件.txt"), spaced.resolve("final.txt"));
+        assertEquals(2, capture.completed("cmd-ren").size());
+    }
+
+    @Test void directoryScopesNeverEnumerateTheWorkspaceRootOrAssumeOversizedTreesAreEmpty() throws Exception {
+        var scope = Files.createDirectories(root.resolve("large"));
+        for (int i = 0; i < 520; i++) Files.writeString(scope.resolve(i + ".txt"), "before");
+        var capture = new CommandFileCapture(root);
+        capture.started("cmd", "generator . large", null);
+        Files.writeString(root.resolve("unrelated.txt"), "outside scope");
+        Files.writeString(scope.resolve("generated.txt"), "output");
+        assertTrue(capture.completed("cmd").isEmpty());
     }
 }

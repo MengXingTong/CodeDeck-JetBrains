@@ -34,13 +34,27 @@ Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检�
 
 `CodexFileReferenceLiveTest` 验证引用能否被模型实际读取：将 `CODEDECK_REAL_REFERENCE_CODEX` 设为本机 `codex.exe` 完整路径后，执行 `./gradlew :test --tests com.codexgui.service.CodexFileReferenceLiveTest`。它通过临时只读会话发起一次真实请求，引用含中文和空格路径的临时文件，检查模型返回只存于文件中的随机值；未设置该变量时跳过。
 
+`CodexChangeCaptureLiveTest` 在独立项目中让真实模型逐组执行文件变更，并通过原生 app-server 事件调用插件生产捕获代码。启用方式：设置 `CODEDECK_REAL_CAPTURE_CODEX` 为本机 `codex.exe` 的完整路径，执行 `./gradlew :test --tests com.codexgui.ui.CodexChangeCaptureLiveTest`。它会实际请求模型并写入专用测试项目，普通 `check` 未设置变量时跳过。默认结果保存到仓库相邻的 `CodeDeck-Capture-Lab/<UTC时间>/`，可用 `CODEDECK_CAPTURE_LAB` 指定其他位置；`project/` 保留模型修改后的文件，`events.jsonl` 保留原始协议，`report.md` 和 `report.json` 逐组列出独立磁盘快照与捕获结果、遗漏、误报、修改前后字节不符、未执行项及实际撤销后的差异。报告由测试进程生成，不能以模型声称完成代替验收。覆盖补丁新增/更新/删除/移动（包括覆盖已有目标）、PowerShell cmdlet/重定向、.NET、Node、Python、cmd、中文与空格重命名、空文件、二进制、动态路径、原子替换、目录复制/移动/递归删除、外部脚本、同一文件连续修改、失败命令已落盘的部分修改和纯读取。此有限矩阵用于发现真实工具链的遗漏，不代表任意外部程序、超限目录或并发用户编辑均可无损捕获。
+
+同时有其他构建使用当前工作区时，文件捕获验收可使用独立构建输出：`./gradlew --no-configuration-cache -I tools/capture-validation.init.gradle :test --tests com.codexgui.ui.CodexChangeCaptureLiveTest`。设置 `CODEDECK_CAPTURE_SCENARIOS` 为英文逗号分隔的场景名可单独复验，例如 `rename-paths,patch-overwrite`；不设置时运行完整矩阵。
+
+其中 `line-endings` 场景让真实模型故意通过 shell 和补丁置换已有文件的 LF / CRLF、移除 UTF-8 BOM；测试独立检查恢复原格式后仍保留代码修改，以及仅换行变化不产生净差异，并继续核对原始基线与实际撤销结果。
+
+独立构建脚本同时将浏览器预览绑定到该构建实际打包的前端文件，并自动选择临时空闲端口，避免浏览器回归误读默认构建的旧包、端口冲突或复用其他预览进程；需要固定端口时设置 `CODEDECK_TEST_PREVIEW_PORT`。普通手动预览仍默认使用 4173 端口。
+
+`src/test/browser/prompt-ime.spec.ts` 使用 Chromium 的 `Input.imeSetComposition` 驱动原生组合编辑，覆盖 `wen → we → w → 空`、三次 Backspace、已有文字、后台更新和中文提交后立即发送。提前 `compositionend` 的分支注入宿主通知先于最后一次原生取消的时序，验证页面重绘不会抢先移走输入框。此测试不等同于直接驱动 Windows 微软拼音的候选窗；微软拼音在 Rider / JCEF 中的最终体验仍应通过安装包手动核对。
+
 `AiAnnotationLayoutIntegrationTest` 在真实 IntelliJ 编辑器中检查注释占位、源码行坐标、换行、字体缩放、水平滚动和折叠：设置 `CODEDECK_REAL_EDITOR_LAYOUT=1` 后，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.changelist.ai.AiAnnotationLayoutIntegrationTest`。此独立检查加载完整 IDE 测试运行时，不请求模型；普通测试默认跳过。
+
+`ConversationChangeTrackerIdeTest` 验证真实 VFS、打开的编辑器文档与磁盘字节的撤销结果：设置 `CODEDECK_REAL_IDE_ROLLBACK=1`，执行 `./gradlew --no-configuration-cache -I tools/capture-validation.init.gradle -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.service.ConversationChangeTrackerIdeTest`。覆盖单项 / 全部撤销、CRLF、LF、混合换行、UTF-8 BOM 与未保存编辑；可用 `CODEDECK_ROLLBACK_BEFORE` 和 `CODEDECK_ROLLBACK_AFTER` 指定四个 NPC 文件的副本目录复现真实问题。此检查不修改业务项目、不请求模型，普通测试默认跳过。
 
 `WorkspaceDropIntegrationTest` 检查 ChangeList 实际导出的文件经过原生 IDE 拖放管理器后进入聊天输入框：设置 `CODEDECK_REAL_IDE_DND=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.WorkspaceDropIntegrationTest`。覆盖中文与空格路径、已删除文件、图片附件、落点、重复拖入及离开时清理，不请求模型；普通测试默认跳过。
 
 `ConversationConnectionIntegrationTest` 在真实 IDE 事件队列中重放首条消息先启动、“已连接”通知后到达的顺序：设置 `CODEDECK_REAL_CONNECTION_STATE=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ConversationConnectionIntegrationTest`。检查首条回复与会话绑定、重复连接通知、真正断开时的清理及 Claude 隔离，不启动 CLI 或请求模型；普通测试默认跳过。
 
 ## 持续集成与工程结构
+
+`ProviderModelOptionsIntegrationTest` 在真实 IDE 事件队列中验证聊天模型缓存、页签复用、供应商隔离、接口目录优先级和旧项目提示词迁移：设置 `CODEDECK_REAL_MODEL_OPTIONS=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ProviderModelOptionsIntegrationTest`。不启动 CLI 或请求模型；普通测试默认跳过。
 
 仓库在每次 push 和 Pull Request 上执行插件验证流程，包括：
 

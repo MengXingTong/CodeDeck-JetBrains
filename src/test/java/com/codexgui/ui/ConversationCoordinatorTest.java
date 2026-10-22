@@ -4,6 +4,7 @@ import com.codexgui.conversation.SessionId;
 import com.codexgui.conversation.SessionRegistry;
 import com.codexgui.conversation.SessionCoordinator;
 import com.codexgui.provider.TurnEvent;
+import com.codexgui.model.ChangeEntry;
 import com.codexgui.service.ConversationChangeTracker;
 import com.codexgui.service.CodexAppServerService;
 import com.codexgui.service.FileReferenceText;
@@ -18,10 +19,58 @@ import java.util.Map;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class ConversationCoordinatorTest {
     @TempDir Path root;
+
+    @Test
+    void completedFileChangesReadObjectKindsAndWholeFileContentsFromLiveAndHistoryItems() throws Exception {
+        var header = root.resolve("JYInteractionPlacementHelper.h");
+        var content = "#pragma once\nclass FJYInteractionPlacementHelper {};\n";
+        Files.writeString(header, content);
+        var updated = root.resolve("updated.cpp"); Files.writeString(updated, "after\n");
+        var deleted = root.resolve("deleted.cpp");
+        var constructor = ConversationChangeTracker.class.getDeclaredConstructor(Path.class);
+        constructor.setAccessible(true);
+        var tracker = constructor.newInstance(root);
+        var registry = new SessionRegistry();
+        var codex = new CodexAppServerService(null);
+        try {
+            var presenter = new BridgeEventPresenter(null, null, registry, root);
+            var coordinator = new ConversationCoordinator(null, null, codex, null, null, null,
+                tracker, null, registry, null, null, null, null, null, presenter, null);
+            var item = JsonParser.parseString("""
+                {"id":"patch","type":"fileChange","status":"completed","changes":[
+                  {"path":"JYInteractionPlacementHelper.h","kind":{"type":"add"}},
+                  {"path":"updated.cpp","kind":{"type":"update","move_path":null},"diff":"@@ -1 +1 @@\\n-before\\n+after\\n"},
+                  {"path":"deleted.cpp","kind":{"type":"delete"},"diff":"deleted content\\n"}
+                ]}
+                """).getAsJsonObject();
+            item.getAsJsonArray("changes").get(0).getAsJsonObject().addProperty("diff", content);
+            var render = ConversationCoordinator.class.getDeclaredMethod("renderCompletedItem",
+                com.codexgui.conversation.ConversationSession.class, JsonObject.class);
+            render.setAccessible(true);
+            render.invoke(coordinator, registry.active(), item);
+
+            var sessionId = registry.activeSessionId().value();
+            assertEquals(List.of(ChangeEntry.Kind.ADDED, ChangeEntry.Kind.MODIFIED, ChangeEntry.Kind.DELETED),
+                tracker.listSummaries(sessionId).stream().map(ConversationChangeTracker.ChangeSummary::kind).toList());
+            tracker.revertAll(sessionId);
+            assertFalse(Files.exists(header));
+            assertEquals("before\n", Files.readString(updated));
+            assertEquals("deleted content\n", Files.readString(deleted));
+
+            // A failed or still-proposed addition must not claim an existing user file.
+            Files.writeString(header, "user file\n");
+            for (var status : List.of("inProgress", "failed", "declined")) {
+                item.addProperty("status", status);
+                render.invoke(coordinator, registry.active(), item);
+            }
+            assertTrue(tracker.listSummaries(sessionId).isEmpty());
+        } finally { tracker.dispose(); codex.dispose(); }
+    }
 
     @Test
     void restoredHistoryRetainsReferenceTagsForTextInputsAndOlderMentions() throws Exception {
@@ -76,6 +125,19 @@ final class ConversationCoordinatorTest {
             coordinator.captureCodexCommand(started);
             Files.delete(path); tracker.commandCompleted(background.id().value(), "cmd");
             assertTrue(tracker.listSummaries(background.id().value()).isEmpty());
+
+            var moveHandle = sessions.beginTurn(background.id());
+            var source = root.resolve("old.txt"); Files.writeString(source, "source before\n");
+            var destination = root.resolve("destination.txt"); Files.writeString(destination, "destination before\n");
+            coordinator.captureCodexCommand(new TurnEvent.Item(moveHandle, TurnEvent.Item.Phase.STARTED, "move", "fileChange",
+                Map.of("changes", List.of(Map.of("path", source.toString(), "kind", Map.of("type", "update", "move_path", destination.toString()))))));
+            Files.writeString(destination, "after\n"); Files.delete(source);
+            tracker.commandCompleted(background.id().value(), "move");
+            tracker.trackProviderFile(background.id().value(), source.toString(), "update",
+                "@@ -1 +1 @@\n-source before\n+after\n", destination.toString());
+            tracker.revertAll(background.id().value());
+            assertEquals("source before\n", Files.readString(source));
+            assertEquals("destination before\n", Files.readString(destination));
         } finally { tracker.dispose(); codex.dispose(); }
     }
 

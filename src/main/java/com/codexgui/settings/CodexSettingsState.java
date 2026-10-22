@@ -5,7 +5,6 @@ import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import org.jetbrains.annotations.NotNull;
-import com.intellij.util.messages.Topic;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,12 +12,25 @@ import java.util.Objects;
 
 @State(name = "CodexGuiSettings", storages = @Storage("codex-gui.xml"))
 public final class CodexSettingsState implements PersistentStateComponent<CodexSettingsState.StateData> {
-    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final int CURRENT_SCHEMA_VERSION = 3;
     public static final String CODEX_CHANNEL = "codex";
     public static final String CLAUDE_CHANNEL = "claude";
     public static final String CODEX_LOCAL_PROVIDER_ID = "codex-local";
     public static final String CLAUDE_LOCAL_PROVIDER_ID = "claude-local";
-    public static final Topic<Runnable> GPT_OPTIONS_CHANGED = Topic.create("CodeDeck GPT inference options", Runnable.class);
+
+    public enum AnnotationScope { DIFF, BATCH }
+
+    public static final class AnnotationModel {
+        public String providerId = "";
+        public String model = "";
+        public List<String> customModels = new ArrayList<>();
+    }
+
+    public static final class AnnotationPreferences {
+        public String reasoningEffort = "high";
+        public boolean fast;
+        public List<AnnotationModel> models = new ArrayList<>();
+    }
 
     public enum ProviderChannel {
         CODEX(CODEX_CHANNEL), CLAUDE(CLAUDE_CHANNEL);
@@ -94,6 +106,8 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
         public String claudeModel = "";
         public String reasoningEffort = "high";
         public String serviceTier = "standard";
+        public AnnotationPreferences diffAnnotation = new AnnotationPreferences();
+        public AnnotationPreferences batchAnnotation = new AnnotationPreferences();
         public String approvalPolicy = "on-request";
         public String sandboxMode = "workspace-write";
         public boolean streamResponses = true;
@@ -102,6 +116,7 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
         public int permissionDialogTimeoutSeconds = 300;
         public boolean sendOpenedFilePath = false;
         public boolean diffExpandedByDefault = false;
+        public boolean preserveFileLineEndings = true;
         public boolean newSessionConfirmEnabled = true;
         public boolean askUserQuestionNotificationEnabled = false;
         public boolean askUserQuestionSoundEnabled = false;
@@ -278,6 +293,38 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
         state.serviceTier = (fast ? ServiceTier.FAST : ServiceTier.STANDARD).value();
     }
 
+    public synchronized AnnotationPreferences annotationPreferences(AnnotationScope scope) {
+        if (state.diffAnnotation == null) state.diffAnnotation = new AnnotationPreferences();
+        if (state.batchAnnotation == null) state.batchAnnotation = new AnnotationPreferences();
+        return scope == AnnotationScope.DIFF ? state.diffAnnotation : state.batchAnnotation;
+    }
+
+    public synchronized AnnotationModel annotationModel(AnnotationScope scope) {
+        var preferences = annotationPreferences(scope);
+        if (preferences.models == null) preferences.models = new ArrayList<>();
+        var provider = activeProvider(CODEX_CHANNEL);
+        var providerId = provider.id;
+        var selected = preferences.models.stream().filter(Objects::nonNull)
+            .filter(item -> providerId.equals(item.providerId)).findFirst().orElse(null);
+        if (selected == null) {
+            selected = new AnnotationModel();
+            selected.providerId = providerId;
+            // New connections get an initial model once; later chat selections remain independent.
+            selected.model = provider.builtIn ? "" : provider.model;
+            preferences.models.add(selected);
+        }
+        if (selected.model == null) selected.model = "";
+        if (selected.customModels == null) selected.customModels = new ArrayList<>();
+        return selected;
+    }
+
+    public synchronized void setAnnotationOptions(AnnotationScope scope, String model, String effort, boolean fast) {
+        annotationModel(scope).model = Objects.requireNonNullElse(model, "").strip();
+        var preferences = annotationPreferences(scope);
+        preferences.reasoningEffort = ReasoningEffort.from(effort).value();
+        preferences.fast = fast;
+    }
+
     public ProviderProfile activeProvider(String channel) {
         normalizeProviders();
         var activeId = CLAUDE_CHANNEL.equals(channel) ? state.activeClaudeProviderId : state.activeCodexProviderId;
@@ -343,7 +390,27 @@ public final class CodexSettingsState implements PersistentStateComponent<CodexS
         target.sandboxMode = SandboxMode.from(target.sandboxMode).value();
         target.sendShortcut = SendShortcut.from(target.sendShortcut).value();
         normalizeProviders();
+        if (target.schemaVersion < 3) {
+            // Copy the former shared choices once; each annotation context then owns its preferences.
+            target.diffAnnotation = migratedAnnotationPreferences();
+            target.batchAnnotation = migratedAnnotationPreferences();
+        }
         target.schemaVersion = CURRENT_SCHEMA_VERSION;
+    }
+
+    private AnnotationPreferences migratedAnnotationPreferences() {
+        var preferences = new AnnotationPreferences();
+        preferences.reasoningEffort = ReasoningEffort.from(state.reasoningEffort).value();
+        preferences.fast = ServiceTier.from(state.serviceTier) == ServiceTier.FAST;
+        for (var provider : state.providers) {
+            if (!CODEX_CHANNEL.equals(provider.channel)) continue;
+            var model = new AnnotationModel();
+            model.providerId = provider.id;
+            model.model = Objects.requireNonNullElse(provider.builtIn ? state.model : provider.model, "");
+            model.customModels = new ArrayList<>(provider.customModels);
+            preferences.models.add(model);
+        }
+        return preferences;
     }
 
     private ProviderProfile providerInChannel(String id, String channel) {

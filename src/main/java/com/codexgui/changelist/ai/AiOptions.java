@@ -14,11 +14,18 @@ public record AiOptions(String executable, String model, String effort, boolean 
         executable = clean(executable); model = clean(model); effort = clean(effort);
     }
     private static String clean(String value) { return value == null ? "" : value.strip(); }
-    public static AiOptions from(CodexSettingsState.SettingsSnapshot settings) {
-        var provider = settings.provider();
-        var model = provider.builtIn() ? settings.model() : provider.model();
-        return new AiOptions(settings.codexExecutable(), model, settings.reasoningEffort().value(),
-                settings.serviceTier() == CodexSettingsState.ServiceTier.FAST, provider);
+    public static AiOptions from(CodexSettingsState settings, CodexSettingsState.AnnotationScope scope) {
+        synchronized (settings) {
+            var shared = settings.snapshot(CodexSettingsState.CODEX_CHANNEL);
+            var preferences = settings.annotationPreferences(scope);
+            var model = settings.annotationModel(scope).model;
+            var connection = shared.provider();
+            // The provider's chat model must not affect annotation equality or running-task snapshots.
+            var provider = new CodexSettingsState.ProviderProfileSnapshot(connection.id(), connection.channel(),
+                    connection.name(), connection.baseUrl(), model, connection.wireApi(), connection.builtIn(), connection.revision());
+            return new AiOptions(shared.codexExecutable(), model,
+                    CodexSettingsState.ReasoningEffort.from(preferences.reasoningEffort).value(), preferences.fast, provider);
+        }
     }
     public String cacheKey(AiDiffSnapshot snapshot) {
         return snapshot.fingerprint() + ":codedeck-v1:" + executable + ":" + model + ":" + effort + ":" + fast

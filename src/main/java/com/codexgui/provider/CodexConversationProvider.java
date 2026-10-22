@@ -11,9 +11,16 @@ import com.google.gson.reflect.TypeToken;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class CodexConversationProvider implements ConversationProvider, CodexEventListener, AutoCloseable {
-    private record ActiveTurn(String threadId, String providerTurnId, TurnEventSink sink) {}
+    private record ActiveTurn(String threadId, String providerTurnId, TurnEventSink sink, AtomicBoolean cancelled) {
+        ActiveTurn(String threadId, String providerTurnId, TurnEventSink sink) {
+            this(threadId, providerTurnId, sink, new AtomicBoolean());
+        }
+    }
 
     private static final Gson GSON = new Gson();
     private static final TypeToken<Map<String, Object>> ITEM_DATA_TYPE = new TypeToken<>() {};
@@ -39,34 +46,49 @@ public final class CodexConversationProvider implements ConversationProvider, Co
     @Override
     public TurnHandle startTurn(TurnRequest request, TurnEventSink sink) {
         var handle = request.handle();
-        var thread = request.conversationId().isBlank()
-            ? service.startThread(
-                request.model(), request.effort(), request.serviceTier(), request.approvalPolicy(),
-                request.sandboxMode(), request.instructions())
-                .thenApply(result -> result.getAsJsonObject("thread").get("id").getAsString())
-            : java.util.concurrent.CompletableFuture.completedFuture(request.conversationId());
+        var pending = new ActiveTurn("", "", sink);
+        activeTurns.put(handle, pending);
+        // Register before thread/start so stop/close also covers the startup window.
+        var thread = CompletableFuture.completedFuture(request.conversationId())
+            .thenCompose(conversationId -> conversationId.isBlank()
+                ? service.startThread(
+                    request.model(), request.effort(), request.serviceTier(), request.approvalPolicy(),
+                    request.sandboxMode(), request.instructions())
+                    .thenApply(result -> result.getAsJsonObject("thread").get("id").getAsString())
+                : CompletableFuture.completedFuture(conversationId));
         thread.thenCompose(threadId -> {
-            registerTurn(handle, threadId, sink);
-            return service.startTurn(
-                threadId,
-                request.input(),
-                request.attachments(),
-                request.fileReferences(),
-                request.model(),
-                request.effort(),
-                request.serviceTier(),
-                request.approvalPolicy(),
-                request.sandboxMode()
-            ).thenApply(result -> {
+            synchronized (pending.cancelled()) {
+                if (pending.cancelled().get()) return CompletableFuture.failedFuture(new CancellationException());
+                activeTurns.computeIfPresent(handle, (ignored, active) ->
+                    new ActiveTurn(threadId, "", sink, pending.cancelled()));
+            }
+            sink.accept(new TurnEvent.Started(handle, threadId, ""));
+            CompletableFuture<JsonObject> started;
+            synchronized (pending.cancelled()) {
+                if (pending.cancelled().get()) return CompletableFuture.failedFuture(new CancellationException());
+                started = service.startTurn(
+                    threadId, request.input(), request.attachments(), request.fileReferences(), request.model(),
+                    request.effort(), request.serviceTier(), request.approvalPolicy(), request.sandboxMode());
+            }
+            return started.thenApply(result -> {
                 var turn = result.getAsJsonObject("turn");
                 var turnId = turn == null || !turn.has("id") ? "" : turn.get("id").getAsString();
-                activeTurns.computeIfPresent(handle, (ignored, active) ->
-                    new ActiveTurn(threadId, turnId, active.sink()));
-                sink.accept(new TurnEvent.Started(handle, threadId, turnId));
+                boolean cancelled;
+                synchronized (pending.cancelled()) {
+                    cancelled = pending.cancelled().get();
+                    if (!cancelled) activeTurns.computeIfPresent(handle, (ignored, active) ->
+                        new ActiveTurn(threadId, turnId, active.sink(), active.cancelled()));
+                }
+                if (cancelled) {
+                    if (!turnId.isBlank()) service.interruptTurn(threadId, turnId);
+                } else {
+                    sink.accept(new TurnEvent.Started(handle, threadId, turnId));
+                }
                 return result;
             });
         }).exceptionally(error -> {
             activeTurns.remove(handle);
+            if (pending.cancelled().get()) return null;
             var cause = error instanceof java.util.concurrent.CompletionException && error.getCause() != null
                 ? error.getCause() : error;
             sink.accept(new TurnEvent.Failed(handle, cause, cause instanceof java.util.concurrent.CancellationException));
@@ -82,9 +104,15 @@ public final class CodexConversationProvider implements ConversationProvider, Co
 
     @Override
     public boolean cancel(TurnHandle handle) {
-        var turn = activeTurns.remove(handle);
-        if (turn == null || turn.providerTurnId().isBlank()) return false;
-        service.interruptTurn(turn.threadId(), turn.providerTurnId());
+        if (handle == null) return false;
+        var turn = activeTurns.get(handle);
+        if (turn == null) return false;
+        synchronized (turn.cancelled()) {
+            turn = activeTurns.remove(handle);
+            if (turn == null) return false;
+            turn.cancelled().set(true);
+        }
+        if (!turn.providerTurnId().isBlank()) service.interruptTurn(turn.threadId(), turn.providerTurnId());
         return true;
     }
 
@@ -94,7 +122,13 @@ public final class CodexConversationProvider implements ConversationProvider, Co
     public void onConnectionChanged(boolean connected, String detail) {
         if (connected) return;
         var error = new IllegalStateException(detail == null || detail.isBlank() ? "Codex app-server 连接已断开" : detail);
-        activeTurns.forEach((handle, active) -> active.sink().accept(new TurnEvent.Failed(handle, error, false)));
+        activeTurns.forEach((handle, active) -> {
+            synchronized (active.cancelled()) {
+                active.cancelled().set(true);
+                activeTurns.remove(handle);
+            }
+            active.sink().accept(new TurnEvent.Failed(handle, error, false));
+        });
         activeTurns.clear();
     }
 
@@ -102,16 +136,20 @@ public final class CodexConversationProvider implements ConversationProvider, Co
     public void onNotification(String method, JsonObject params) {
         var active = findActive(params);
         if (active == null) return;
-        var event = decodeNotification(active.getKey(), method, params);
-        if (event == null) return;
+        TurnEvent event;
+        synchronized (active.getValue().cancelled()) {
+            if (active.getValue().cancelled().get() || !activeTurns.containsKey(active.getKey())) return;
+            event = decodeNotification(active.getKey(), method, params);
+            if (event == null) return;
+            if (event instanceof TurnEvent.Started started && !started.providerTurnId().isBlank()) {
+                activeTurns.computeIfPresent(active.getKey(), (ignored, current) ->
+                    new ActiveTurn(current.threadId(), started.providerTurnId(), current.sink(), current.cancelled()));
+            }
+            if (event instanceof TurnEvent.Completed || event instanceof TurnEvent.Failed) {
+                activeTurns.remove(active.getKey());
+            }
+        }
         active.getValue().sink().accept(event);
-        if (event instanceof TurnEvent.Started started && !started.providerTurnId().isBlank()) {
-            activeTurns.computeIfPresent(active.getKey(), (ignored, current) ->
-                new ActiveTurn(current.threadId(), started.providerTurnId(), current.sink()));
-        }
-        if (event instanceof TurnEvent.Completed || event instanceof TurnEvent.Failed) {
-            activeTurns.remove(active.getKey());
-        }
     }
 
     static TurnEvent decodeNotification(TurnHandle handle, String method, JsonObject params) {
@@ -126,6 +164,13 @@ public final class CodexConversationProvider implements ConversationProvider, Co
             case "item/commandExecution/outputDelta" -> delta(handle, TurnEvent.Delta.Kind.COMMAND, params);
             case "item/started" -> item(handle, TurnEvent.Item.Phase.STARTED, object(params, "item"));
             case "item/completed" -> item(handle, TurnEvent.Item.Phase.COMPLETED, object(params, "item"));
+            case "rawResponseItem/completed" -> {
+                var raw = object(params, "item"); var type = string(raw, "type", "");
+                if (!Set.of("custom_tool_call", "function_call", "custom_tool_call_output", "function_call_output").contains(type)) yield null;
+                var data = raw.deepCopy(); data.addProperty("type", "rawToolCall");
+                data.addProperty("id", "raw:" + string(raw, "call_id", string(raw, "id", "")));
+                yield item(handle, type.endsWith("_output") ? TurnEvent.Item.Phase.COMPLETED : TurnEvent.Item.Phase.STARTED, data);
+            }
             case "item/fileChange/patchUpdated" -> item(handle, TurnEvent.Item.Phase.UPDATED, params);
             case "turn/diff/updated" -> new TurnEvent.Change(handle, string(params, "diff", ""));
             case "thread/tokenUsage/updated" -> usage(handle, params);
@@ -154,6 +199,7 @@ public final class CodexConversationProvider implements ConversationProvider, Co
         var turnId = turnId(params);
         for (var entry : activeTurns.entrySet()) {
             var active = entry.getValue();
+            if (active.threadId().isBlank()) continue;
             if (!threadId.isBlank() && !threadId.equals(active.threadId())) continue;
             if (!turnId.isBlank() && !active.providerTurnId().isBlank() && !turnId.equals(active.providerTurnId())) continue;
             if (threadId.isBlank() && turnId.isBlank()) continue;
@@ -235,6 +281,9 @@ public final class CodexConversationProvider implements ConversationProvider, Co
     @Override
     public void close() {
         service.removeListener(this);
+        activeTurns.values().forEach(active -> {
+            synchronized (active.cancelled()) { active.cancelled().set(true); }
+        });
         activeTurns.clear();
     }
 }

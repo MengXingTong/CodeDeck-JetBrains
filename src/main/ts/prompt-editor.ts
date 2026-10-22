@@ -206,6 +206,8 @@ export class PromptEditor {
   private pendingSequence = 0;
   private externalDropPosition: number | null = null;
   private draggedReferenceId: string | null = null;
+  private compositionActive = false;
+  private compositionEndTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: PromptEditorOptions) {
     this.options = options;
@@ -259,9 +261,18 @@ export class PromptEditor {
         dragstart: (_view, event) => this.handleReferenceDragStart(event as DragEvent),
         dragend: () => this.finishReferenceDrag(),
         drop: (_view, event) => this.handleReferenceDrop(event as DragEvent),
-        compositionstart: () => false,
+        compositionstart: () => this.startComposition(),
+        compositionupdate: () => this.startComposition(),
         compositionend: () => {
-          queueMicrotask(() => this.options.onUpdate?.());
+          this.compositionActive = false;
+          if (this.compositionEndTimer !== null) clearTimeout(this.compositionEndTimer);
+          // Windows IMEs can notify compositionend before the final native deletion/input.
+          // Keep the host from detaching this DOM until those events and ProseMirror's
+          // scheduled composition flush (20 ms) have settled.
+          this.compositionEndTimer = setTimeout(() => {
+            this.compositionEndTimer = null;
+            this.options.onUpdate?.();
+          }, 50);
           return false;
         },
       },
@@ -275,7 +286,7 @@ export class PromptEditor {
   }
 
   get composing(): boolean {
-    return this.view.composing;
+    return this.compositionActive || this.compositionEndTimer !== null || this.view.composing;
   }
 
   get focused(): boolean {
@@ -283,7 +294,17 @@ export class PromptEditor {
   }
 
   destroy(): void {
+    if (this.compositionEndTimer !== null) clearTimeout(this.compositionEndTimer);
+    this.compositionEndTimer = null;
+    this.compositionActive = false;
     this.view.destroy();
+  }
+
+  private startComposition(): false {
+    if (this.compositionEndTimer !== null) clearTimeout(this.compositionEndTimer);
+    this.compositionEndTimer = null;
+    this.compositionActive = true;
+    return false;
   }
 
   focus(): void {
@@ -506,8 +527,8 @@ export class PromptEditor {
   }
 
   private handleKeyDown(event: KeyboardEvent): boolean {
+    if (this.compositionActive || this.view.composing || event.isComposing || event.keyCode === 229) return false;
     if (this.options.onKeyDown?.(event)) return true;
-    if (event.isComposing || event.keyCode === 229) return false;
     if (event.key === 'Enter') {
       event.preventDefault();
       if (this.options.shouldSubmit(event)) this.options.onSubmit();

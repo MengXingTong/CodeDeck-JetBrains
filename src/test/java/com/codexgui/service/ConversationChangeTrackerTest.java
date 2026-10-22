@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,6 +42,58 @@ final class ConversationChangeTrackerTest {
         tracker.revert("session", path);
         assertEquals("original\n", Files.readString(path, StandardCharsets.UTF_8));
         assertTrue(tracker.listSummaries("session").isEmpty());
+    }
+
+    @Test
+    void shellAndRepeatedPatchesPreserveOriginalSeparatorsAndBom() throws IOException {
+        var path = write("file.txt", "\ufeffold\r\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "shell", "Set-Content 'file.txt'", root.toString());
+        Files.writeString(path, "new\n");
+        tracker.commandCompleted("session", "shell");
+        assertEquals("\ufeffnew\r\n", Files.readString(path));
+        tracker.patchStarted("session", "patch1", List.of("file.txt"));
+        Files.writeString(path, "second\n");
+        tracker.patchCompleted("session", "patch1");
+        tracker.patchStarted("session", "patch2", List.of("file.txt"));
+        Files.writeString(path, "third\n");
+        tracker.patchCompleted("session", "patch2");
+        assertEquals("\ufeffthird\r\n", Files.readString(path));
+        tracker.revert("session", path);
+        assertEquals("\ufeffold\r\n", Files.readString(path));
+    }
+
+    @Test
+    void formatOnlyChangesDisappearAndPreWriteHooksFinalizeAtTurnEnd() throws IOException {
+        var path = write("file.txt", "original\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.patchStarted("session", "patch", List.of("file.txt"));
+        Files.writeString(path, "original\r\n");
+        tracker.patchCompleted("session", "patch");
+        assertEquals("original\n", Files.readString(path));
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        tracker.trackBeforeWrite("session", "file.txt");
+        Files.writeString(path, "changed\r\n");
+        tracker.finishCommands("session");
+        assertEquals("changed\n", Files.readString(path));
+        assertArrayEquals(bytes("original\n"), tracker.readDetails("session", path).beforeContent());
+    }
+
+    @Test
+    void formatGuardCanBeDisabledAndNeverRewritesHistoryOrNewFiles() throws IOException {
+        var path = write("file.txt", "before\r\n");
+        var tracker = new ConversationChangeTracker(root, () -> false);
+        tracker.patchStarted("session", "convert", List.of("file.txt"));
+        Files.writeString(path, "after\n");
+        tracker.patchCompleted("session", "convert");
+        assertEquals("after\n", Files.readString(path));
+        tracker = new ConversationChangeTracker(root);
+        tracker.trackProviderFile("history", "file.txt", "update", "@@ -1 +1 @@\n-before\r\n+after\n");
+        assertEquals("after\n", Files.readString(path));
+        tracker.patchStarted("session", "add", List.of("new.txt"));
+        var added = write("new.txt", "new\r\n");
+        tracker.patchCompleted("session", "add");
+        assertEquals("new\r\n", Files.readString(added));
     }
 
     @Test
@@ -80,6 +133,73 @@ final class ConversationChangeTrackerTest {
         tracker.revertAll("session");
         assertFalse(Files.exists(added));
         assertEquals("before\n", Files.readString(deleted, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void capturesCodexWholeFileAdditionsIncludingEmptyFiles() throws IOException {
+        Files.createDirectories(root.resolve("Helper"));
+        var header = write("Helper/JYInteractionPlacementHelper.h", "#pragma once\nclass FJYInteractionPlacementHelper {};\n");
+        var empty = write("empty.txt", "");
+        var tracker = new ConversationChangeTracker(root);
+
+        tracker.trackProviderFile("session", header.toString(), "add", Files.readString(header));
+        tracker.trackProviderFile("session", empty.toString(), "add", "");
+
+        assertEquals(2, tracker.listSummaries("session").size());
+        assertTrue(tracker.listSummaries("session").stream().allMatch(change -> change.kind() == ChangeEntry.Kind.ADDED));
+        assertEquals(2, tracker.listSummaries("session").getFirst().addedLines());
+        tracker.revertAll("session");
+        assertFalse(Files.exists(header));
+        assertFalse(Files.exists(empty));
+    }
+
+    @Test
+    void capturesCodexWholeFileDeletionsAndKeepsTheFirstBaseline() throws IOException {
+        var path = root.resolve("deleted.txt");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.trackProviderFile("session", path.toString(), "delete", "\ufeffbefore\r\n");
+        assertEquals(ChangeEntry.Kind.DELETED, tracker.listSummaries("session").getFirst().kind());
+        tracker.revertAll("session");
+        assertArrayEquals(bytes("\ufeffbefore\r\n"), Files.readAllBytes(path));
+
+        tracker.trackBeforeWrite("session", "deleted.txt");
+        Files.delete(path);
+        tracker.trackProviderFile("session", path.toString(), "delete", "later version\n");
+        tracker.revertAll("session");
+        assertArrayEquals(bytes("\ufeffbefore\r\n"), Files.readAllBytes(path));
+    }
+
+    @Test
+    void historicalMovesWithoutDestinationBytesNeverInventADestructiveRollback() throws IOException {
+        var destination = write("moved.txt", "after\n");
+        var original = root.resolve("old.txt");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.trackProviderDiff("session", "turn", textDiff("moved.txt", "before", "after"));
+        tracker.trackProviderFile("session", original.toString(), "update", "@@ -1 +1 @@\n-before\n+after\n\n\nMoved to: " + destination, destination.toString());
+        assertEquals(List.of(ChangeEntry.Kind.MODIFIED, ChangeEntry.Kind.DELETED),
+            tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::kind).toList());
+        assertFalse(tracker.listSummaries("session").getFirst().reversible());
+        tracker.revert("session", original);
+        assertEquals("after\n", Files.readString(destination));
+        assertEquals("before\n", Files.readString(original));
+    }
+
+    @Test
+    void rawPatchReservationsPreserveOverwrittenDestinationsAndDiscardFailedNoOps() throws IOException {
+        var source = write("source.txt", "source before\n");
+        var destination = write("destination.txt", "destination before\n");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.patchStarted("session", "call", List.of(source.toString(), destination.toString()));
+        Files.delete(source); Files.writeString(destination, "after\n");
+        tracker.trackProviderFile("session", source.toString(), "update", "@@ -1 +1 @@\n-source before\n+after\n", destination.toString());
+        tracker.patchCompleted("session", "call");
+        tracker.revertAll("session");
+        assertEquals("source before\n", Files.readString(source));
+        assertEquals("destination before\n", Files.readString(destination));
+        tracker.patchStarted("session", "failed", List.of(destination.toString()));
+        tracker.patchCompleted("session", "failed");
+        Files.writeString(destination, "later user edit\n");
+        assertTrue(tracker.listSummaries("session").isEmpty());
     }
 
     @Test

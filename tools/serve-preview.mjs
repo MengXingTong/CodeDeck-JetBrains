@@ -18,7 +18,9 @@ createServer(async (request, response) => {
   try {
     const url = new URL(request.url || '/', `http://${request.headers.host || '127.0.0.1'}`);
     const requestedPath = decodeURIComponent(url.pathname === '/' ? '/tools/ui-preview.html' : url.pathname);
-    const absolutePath = resolve(workspaceRoot, requestedPath.slice(1));
+    const absolutePath = requestedPath === '/build/generated-resources/web/app.js' && process.env.CODEDECK_PREVIEW_BUNDLE
+      ? resolve(process.env.CODEDECK_PREVIEW_BUNDLE)
+      : resolve(workspaceRoot, requestedPath.slice(1));
     const workspaceRelativePath = relative(workspaceRoot, absolutePath);
 
     // 预览服务只允许读取仓库内文件，避免编码后的路径穿越工作区。

@@ -380,11 +380,11 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         presenter.attachments(session);
         presenter.fileReferences(session);
         presenter.thread(session);
-        // 渠道变化后立即刷新供应商状态和模型，确保当前页签只使用目标渠道配置。
+        // 新页签也可能创建于模型加载之前，始终补发当前渠道设置与模型。
+        listener.settingsChanged();
+        providerSettings.loadModels(selectedProvider);
         if (changesChannel) {
-            listener.settingsChanged();
             providerSettings.publishProviderStatus();
-            providerSettings.loadModels(selectedProvider);
         }
     }
 
@@ -607,12 +607,6 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     }
 
     private void dispatchInput(ConversationSession session, QueuedInput input, boolean publishUser) {
-        var sessionId = session.id().value();
-        var settings = CodexSettingsState.getInstance().snapshot(session.provider());
-        var providerProfile = settings.provider();
-        var model = providerProfile.builtIn()
-            ? (Objects.equals(session.provider(), "claude") ? settings.claudeModel() : settings.model())
-            : providerProfile.model();
         if (publishUser) {
             session.pendingUserBody(input.display());
             addEntry(session, new ConversationEntry(
@@ -627,42 +621,78 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         var turnHandle = sessionCoordinator.beginTurn(session.id());
         presenter.busy(session);
 
-        // Claude Code 使用独立 CLI 会话，不能把会话 ID 或输入误发给 Codex app-server。
-        if (Objects.equals(session.provider(), "claude")) {
-            dispatchClaudeInput(session, turnHandle, input, settings);
-            return;
-        }
+        try {
+            var settings = CodexSettingsState.getInstance().snapshot(session.provider());
+            var providerProfile = settings.provider();
+            var model = providerProfile.builtIn()
+                ? (Objects.equals(session.provider(), "claude") ? settings.claudeModel() : settings.model())
+                : providerProfile.model();
+            // Claude Code 使用独立 CLI 会话，不能把会话 ID 或输入误发给 Codex app-server。
+            if (Objects.equals(session.provider(), "claude")) {
+                dispatchClaudeInput(session, turnHandle, input, settings);
+                return;
+            }
 
-        var request = new TurnRequest(
-            turnHandle,
-            Objects.requireNonNullElse(session.threadId(), ""),
-            input.inputText(),
-            input.attachments(),
-            input.fileReferences(),
-            model,
-            settings.reasoningEffort().value(),
-            settings.serviceTier().value(),
-            settings.approvalPolicy().value(),
-            settings.sandboxMode().value(),
-            providerSettings.developerInstructions(),
-            "",
-            providerProfile
-        );
-        codexProvider.startTurn(request, event -> {
-            // Snapshot on the protocol reader, before an EDT queue delay can lose the shell baseline.
-            captureCodexCommand(event);
-            ApplicationManager.getApplication().invokeLater(() -> handleCodexTurnEvent(event));
-        });
+            var request = new TurnRequest(
+                turnHandle,
+                Objects.requireNonNullElse(session.threadId(), ""),
+                input.inputText(),
+                input.attachments(),
+                input.fileReferences(),
+                model,
+                settings.reasoningEffort().value(),
+                settings.serviceTier().value(),
+                settings.approvalPolicy().value(),
+                settings.sandboxMode().value(),
+                providerSettings.developerInstructions(),
+                "",
+                providerProfile
+            );
+            codexProvider.startTurn(request, event -> {
+                // Snapshot on the protocol reader, before an EDT queue delay can lose the shell baseline.
+                captureCodexCommand(event);
+                ApplicationManager.getApplication().invokeLater(() -> handleCodexTurnEvent(event));
+            });
+        } catch (RuntimeException error) {
+            // 设置读取或 Provider 启动也可能同步失败，此时还没有远端回合 ID。
+            sessionCoordinator.complete(turnHandle, current -> {
+                approvalCoordinator.clearTurn(turnHandle);
+                if (Objects.equals(current.provider(), "claude")) claudeProvider.cancel(turnHandle);
+                else codexProvider.cancel(turnHandle);
+                current.pendingUserMessageCount(Math.max(0, current.pendingUserMessageCount() - 1));
+                current.pendingUserBody(null);
+                presenter.busy(current);
+                asyncError(current, "无法发送消息", error);
+            });
+        }
     }
 
     void captureCodexCommand(TurnEvent event) {
         if (!sessionCoordinator.isCurrent(event.handle())) return;
         var sessionId = event.handle().sessionId().value();
+        if (event instanceof TurnEvent.Item raw && raw.kind().equals("rawToolCall") && raw.phase() == TurnEvent.Item.Phase.STARTED) {
+            changeService.patchStarted(sessionId, raw.id(), com.codexgui.service.PatchInputPaths.parse(
+                Objects.toString(raw.data().get("name"), ""), Objects.toString(raw.data().get("input"), "")));
+        }
         if (event instanceof TurnEvent.Item item && item.kind().equals("commandExecution")) {
             if (item.phase() == TurnEvent.Item.Phase.STARTED) {
                 changeService.commandStarted(sessionId, item.id(),
                     Objects.toString(item.data().get("command"), ""), Objects.toString(item.data().get("cwd"), ""));
             }
+        }
+        if (event instanceof TurnEvent.Item item && item.kind().equals("fileChange") && item.phase() == TurnEvent.Item.Phase.STARTED) {
+            var payload = GSON.toJsonTree(item.data()).getAsJsonObject();
+            var movePaths = new StringBuilder();
+            for (var element : array(payload, "changes")) {
+                if (!element.isJsonObject()) continue;
+                var change = element.getAsJsonObject(); var kind = change.get("kind");
+                if (kind == null || !kind.isJsonObject()) continue;
+                var destination = string(kind.getAsJsonObject(), "move_path", "");
+                if (destination.isBlank()) continue;
+                for (var path : List.of(string(change, "path", ""), destination))
+                    movePaths.append('"').append(path.replace('\\', '/')).append("\" ");
+            }
+            if (!movePaths.isEmpty()) changeService.commandStarted(sessionId, item.id(), movePaths.toString(), "");
         }
     }
 
@@ -773,7 +803,11 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
 
     private void handleCodexItem(ConversationSession session, TurnEvent.Item item) {
         var source = GSON.toJsonTree(item.data()).getAsJsonObject();
-        if (item.kind().equals("commandExecution") && item.phase() == TurnEvent.Item.Phase.COMPLETED) {
+        if (item.kind().equals("rawToolCall")) {
+            if (item.phase() == TurnEvent.Item.Phase.COMPLETED) changeService.patchCompleted(session.id().value(), item.id());
+            return;
+        }
+        if ((item.kind().equals("commandExecution") || item.kind().equals("fileChange")) && item.phase() == TurnEvent.Item.Phase.COMPLETED) {
             // Publishing summaries reads IDE Documents, so keep this part on the EDT.
             changeService.commandCompleted(session.id().value(), item.id());
             changeService.refreshSession(session.id().value());
@@ -907,6 +941,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
                 } else if (failed != null && !failed.cancelled()) {
                     asyncError(current, "无法发送 Claude Code 消息", failed.error());
                 }
+                changeService.finishCommands(current.id().value());
                 changeService.refreshSession(current.id().value());
                 if (current.pendingUserMessageCount() > 0) {
                     current.pendingUserMessageCount(current.pendingUserMessageCount() - 1);
@@ -967,15 +1002,18 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             var turnHandle = session.handle();
             approvalCoordinator.clearTurn(turnHandle);
             sessionCoordinator.cancel(session.id());
+            session.pendingUserBody(null);
+            session.pendingUserMessageCount(session.queuedInputs().size());
             claudeProvider.cancel(turnHandle);
             presenter.busy(session);
             startNextQueuedInput(session);
             return;
         }
-        if (session.threadId() == null || session.providerTurnId() == null) return;
         var turnHandle = session.handle();
         approvalCoordinator.clearTurn(turnHandle);
         sessionCoordinator.cancel(session.id());
+        session.pendingUserBody(null);
+        session.pendingUserMessageCount(session.queuedInputs().size());
         presenter.busy(session);
         codexProvider.cancel(turnHandle);
         changeService.finishCommands(session.id().value());
@@ -1183,15 +1221,22 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     }
 
     private void updateFileChangeDiffs(String sessionId, JsonObject object) {
+        // Only completed edits own a baseline; started/failed additions can target an existing user file.
+        var status = string(object, "status", "");
+        if (!status.isBlank() && !status.equals("completed")) return;
         // 结构化补丁事件只包含本次文件修改，逐项转交给修改捕获服务。
         for (var element : array(object, "changes")) {
             if (!element.isJsonObject()) continue;
             var change = element.getAsJsonObject();
+            var kind = change.get("kind");
+            var kindName = kind != null && kind.isJsonObject()
+                ? string(kind.getAsJsonObject(), "type", "update") : string(change, "kind", "update");
             changeService.trackProviderFile(
                 sessionId,
                 string(change, "path", ""),
-                string(change, "kind", "update"),
-                string(change, "diff", "")
+                kindName,
+                string(change, "diff", ""),
+                kind != null && kind.isJsonObject() ? string(kind.getAsJsonObject(), "move_path", "") : ""
             );
         }
     }

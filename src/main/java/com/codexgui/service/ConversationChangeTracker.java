@@ -1,6 +1,7 @@
 package com.codexgui.service;
 
 import com.codexgui.model.ChangeEntry;
+import com.codexgui.settings.CodexSettingsState;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
 
 @Service(Service.Level.PROJECT)
 public final class ConversationChangeTracker implements Disposable {
@@ -67,21 +69,30 @@ public final class ConversationChangeTracker implements Disposable {
     private final Project project;
     private final Path root;
     private final WorkspacePathPolicy pathPolicy;
+    private final BooleanSupplier preserveLineEndings;
     private final Map<String, LinkedHashMap<Path, Baseline>> baselinesBySession = new LinkedHashMap<>();
     private final Map<String, CommandFileCapture> commandsBySession = new LinkedHashMap<>();
+    private final Map<String, Map<String, Map<Path, Baseline>>> pendingPatches = new LinkedHashMap<>();
+    private final Map<String, Map<Path, Baseline>> pendingWrites = new LinkedHashMap<>();
     private final CopyOnWriteArrayList<Consumer<ChangeUpdate>> listeners = new CopyOnWriteArrayList<>();
 
     public ConversationChangeTracker(Project project) {
         this.project = project;
         this.root = Path.of(project.getBasePath() == null ? "." : project.getBasePath()).toAbsolutePath().normalize();
         this.pathPolicy = new WorkspacePathPolicy(root);
+        this.preserveLineEndings = () -> CodexSettingsState.getInstance().getState().preserveFileLineEndings;
         installListeners();
     }
 
     ConversationChangeTracker(Path root) {
+        this(root, () -> true);
+    }
+
+    ConversationChangeTracker(Path root, BooleanSupplier preserveLineEndings) {
         this.project = null;
         this.root = root.toAbsolutePath().normalize();
         this.pathPolicy = new WorkspacePathPolicy(this.root);
+        this.preserveLineEndings = preserveLineEndings;
     }
 
     public static ConversationChangeTracker getInstance(@NotNull Project project) {
@@ -98,6 +109,12 @@ public final class ConversationChangeTracker implements Disposable {
         if (target == null) return false;
         var current = readCurrent(target);
         if (current.present() && current.hash() == null) return false;
+        // File tools with a pre-write hook (Claude) are finalized when the live turn ends.
+        var writes = pendingWrites.computeIfAbsent(sessionKey(sessionId), ignored -> new LinkedHashMap<>());
+        if (writes.size() < 128 && current.bytes() != null
+            && writes.values().stream().mapToLong(value -> value.bytes() == null ? 0 : value.bytes().length).sum()
+                + current.bytes().length <= 16L * 1024 * 1024)
+            writes.putIfAbsent(target, new Baseline(BaselineKind.PRESENT, current.bytes(), current.hash(), null));
         return trackBaseline(sessionKey(sessionId), target, current);
     }
 
@@ -116,12 +133,52 @@ public final class ConversationChangeTracker implements Disposable {
     public synchronized void finishCommands(String sessionId) {
         var capture = commandsBySession.remove(sessionKey(sessionId));
         if (capture != null) importCommandChanges(sessionKey(sessionId), capture.finish());
+        var patches = pendingPatches.get(sessionKey(sessionId));
+        if (patches != null) for (var id : List.copyOf(patches.keySet())) patchCompleted(sessionId, id);
+        var writes = pendingWrites.remove(sessionKey(sessionId));
+        if (writes != null) writes.forEach((path, before) -> preserveFormat(path, before.bytes()));
+    }
+
+    public synchronized void patchStarted(String sessionId, String id, List<String> reportedPaths) {
+        if (reportedPaths.isEmpty()) return;
+        var key = sessionKey(sessionId);
+        var patches = pendingPatches.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+        if (patches.containsKey(id) || patches.size() >= 16) return;
+        var reserved = new LinkedHashMap<Path, Baseline>(); long bytes = 0;
+        var baselines = baselinesBySession.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
+        for (var reported : reportedPaths) {
+            var path = resolveReportedPath(reported);
+            if (path == null || reserved.size() >= 128) continue;
+            var current = readDiskCurrent(path);
+            if (current.bytes() != null && current.bytes().length > 16L * 1024 * 1024 - bytes) continue;
+            if (current.bytes() != null) bytes += current.bytes().length;
+            var baseline = new Baseline(current.present() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
+                current.bytes(), current.hash(), null);
+            baselines.putIfAbsent(path, baseline); reserved.put(path, baseline);
+        }
+        // Reserve silently on the protocol reader, before tools run; publish only on completion.
+        patches.put(id, reserved);
+    }
+
+    public synchronized void patchCompleted(String sessionId, String id) {
+        var key = sessionKey(sessionId); var patches = pendingPatches.get(key);
+        if (patches == null) return;
+        var reserved = patches.remove(id);
+        if (patches.isEmpty()) pendingPatches.remove(key);
+        if (reserved == null) return;
+        var baselines = baselinesBySession.get(key);
+        if (baselines == null) return;
+        reserved.forEach((path, before) -> preserveFormat(path, before.bytes()));
+        for (var entry : reserved.entrySet()) if (baselines.get(entry.getKey()) == entry.getValue()
+            && createChange(entry.getKey(), entry.getValue()) == null) baselines.remove(entry.getKey());
+        fireChanged(key);
     }
 
     private void importCommandChanges(String sessionId, List<CommandFileCapture.Before> changes) {
         if (changes.isEmpty()) return;
         var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
         for (var before : changes) {
+            preserveFormat(before.path(), before.bytes());
             baselines.putIfAbsent(before.path(), new Baseline(
                 before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
                 before.bytes(), hash(before.bytes()), null));
@@ -168,10 +225,55 @@ public final class ConversationChangeTracker implements Disposable {
         String kind,
         String diff
     ) {
-        if (reportedPath == null || reportedPath.isBlank() || diff == null || diff.isBlank()) return;
+        trackProviderFile(sessionId, reportedPath, kind, diff, null);
+    }
+
+    public synchronized void trackProviderFile(String sessionId, String reportedPath, String kind, String diff, String movePath) {
+        if (reportedPath == null || reportedPath.isBlank()) return;
+        var target = resolveReportedPath(reportedPath);
+        if (target == null) return;
+        if (movePath != null && !movePath.isBlank()) {
+            var destination = resolveReportedPath(movePath);
+            if (destination == null || destination.equals(target) || Files.exists(target) || !Files.isRegularFile(destination)) return;
+            var after = readDiskCurrent(destination);
+            var hunks = Objects.requireNonNullElse(diff, "").replaceFirst("(?s)\\n\\nMoved to: .*\\z", "");
+            byte[] before = null;
+            if (hunks.isBlank()) before = after.bytes();
+            else {
+                var header = "diff --git a/" + reportedPath + " b/" + movePath + "\n--- a/" + reportedPath + "\n+++ b/" + movePath + "\n";
+                var contents = new LinkedHashMap<String, byte[]>(); contents.put(movePath, after.bytes());
+                var parsed = UnifiedDiffParser.parse(header + hunks, contents);
+                if (!parsed.isEmpty() && parsed.getFirst().matchesCurrent()) before = parsed.getFirst().beforeContent();
+            }
+            var key = sessionKey(sessionId);
+            trackProviderBaseline(key, target, new Baseline(BaselineKind.PRESENT, copy(before), hash(before), null));
+            // A cumulative diff can reach us first and describe the destination as a modification.
+            // Correct that derived baseline, while preserving a command's real first-touch snapshot.
+            var previous = baseline(key, destination);
+            // Without a pre-tool snapshot, history cannot tell whether Move to overwrote a file.
+            // Keep its destination visible but prohibit destructive rollback from invented bytes.
+            trackProviderBaseline(key, destination, new Baseline(BaselineKind.PRESENT, null, null,
+                previous == null ? null : previous.providerTurnKey()));
+            return;
+        }
+        // Codex sends whole file contents for add/delete, and unified hunks for update.
+        // An explicit addition needs only the absent baseline, including an empty new file.
+        if ("add".equals(kind)) {
+            if (Files.isRegularFile(target)) trackProviderBaseline(sessionKey(sessionId), target,
+                new Baseline(BaselineKind.ABSENT, null, null, null));
+            return;
+        }
+        if (diff == null) return;
+        if ("delete".equals(kind) && !diff.startsWith("diff --git ") && !diff.startsWith("@@ ")) {
+            if (Files.exists(target)) return;
+            var before = diff.getBytes(StandardCharsets.UTF_8);
+            trackProviderBaseline(sessionKey(sessionId), target, new Baseline(BaselineKind.PRESENT,
+                before.length <= MAX_BASELINE_BYTES ? before : null, hash(before), null));
+            return;
+        }
+        if (diff.isBlank()) return;
         var header = "diff --git a/" + reportedPath + " b/" + reportedPath + "\n";
         var normalizedDiff = diff.startsWith("diff --git ") ? diff : switch (kind) {
-            case "add" -> header + "new file mode 100644\n--- /dev/null\n+++ b/" + reportedPath + "\n" + diff;
             case "delete" -> header + "deleted file mode 100644\n--- a/" + reportedPath + "\n+++ /dev/null\n" + diff;
             default -> header + "--- a/" + reportedPath + "\n+++ b/" + reportedPath + "\n" + diff;
         };
@@ -206,6 +308,8 @@ public final class ConversationChangeTracker implements Disposable {
 
     public synchronized void acceptAll(String sessionId) {
         var key = sessionKey(sessionId);
+        pendingWrites.remove(key);
+        pendingPatches.remove(key);
         var capture = commandsBySession.get(key);
         if (capture != null) capture.clear();
         baselinesBySession.remove(key);
@@ -244,7 +348,9 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     public synchronized void clearSession(String sessionId) {
+        pendingWrites.remove(sessionKey(sessionId));
         var key = sessionKey(sessionId);
+        pendingPatches.remove(key);
         commandsBySession.remove(key);
         baselinesBySession.remove(key);
         fireChanged(key);
@@ -304,6 +410,10 @@ public final class ConversationChangeTracker implements Disposable {
 
     private void removeBaseline(String sessionId, Path path) {
         if (path == null) return;
+        var writes = pendingWrites.get(sessionId);
+        if (writes != null) writes.remove(path);
+        var patches = pendingPatches.get(sessionId);
+        if (patches != null) patches.values().forEach(values -> values.remove(path));
         var capture = commandsBySession.get(sessionId);
         if (capture != null) capture.forget(path);
         var baselines = baselinesBySession.get(sessionId);
@@ -378,14 +488,41 @@ public final class ConversationChangeTracker implements Disposable {
     private void write(Path path, byte[] content) throws IOException {
         if (project != null && ApplicationManager.getApplication() != null) {
             var file = LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path);
-            var document = file == null ? null : FileDocumentManager.getInstance().getDocument(file);
-            if (document != null) {
-                WriteAction.run(() -> document.setText(new String(content, StandardCharsets.UTF_8)));
-                FileDocumentManager.getInstance().saveDocument(document);
+            if (file != null) {
+                var manager = FileDocumentManager.getInstance();
+                var document = manager.getCachedDocument(file);
+                // Restore original bytes through VFS. Document.setText accepts LF only and saving it
+                // would re-encode BOM / mixed separators using the current file's metadata.
+                WriteAction.run(() -> {
+                    file.setBinaryContent(content);
+                    if (document != null) manager.reloadFromDisk(document);
+                });
                 return;
             }
         }
         Files.write(path, content);
+    }
+
+    private void preserveFormat(Path path, byte[] before) {
+        if (before == null || !preserveLineEndings.getAsBoolean() || normalizePath(path) == null
+            || Files.isSymbolicLink(path) || !Files.isRegularFile(path) || readDocument(path) != null) return;
+        try {
+            byte[] after;
+            try (var stream = Files.newInputStream(path)) { after = stream.readNBytes((int) MAX_BASELINE_BYTES + 1); }
+            if (after.length > MAX_BASELINE_BYTES) return;
+            var preserved = FileLineEndings.preserve(before, after);
+            if (preserved == after || preserved.length > MAX_BASELINE_BYTES) return;
+            // Do not replace an intervening edit or a path redirected by an external command.
+            if (normalizePath(path) == null || Files.isSymbolicLink(path) || readDocument(path) != null) return;
+            try (var stream = Files.newInputStream(path)) {
+                if (!Arrays.equals(after, stream.readNBytes((int) MAX_BASELINE_BYTES + 1))) return;
+            }
+            Files.write(path, preserved);
+            refresh(path);
+        } catch (IOException error) {
+            java.util.logging.Logger.getLogger(ConversationChangeTracker.class.getName())
+                .warning("无法保持文件换行格式: " + path + " (" + error.getMessage() + ")");
+        }
     }
 
     private void delete(Path path) throws IOException {
@@ -511,6 +648,8 @@ public final class ConversationChangeTracker implements Disposable {
 
     @Override
     public synchronized void dispose() {
+        pendingWrites.clear();
+        pendingPatches.clear();
         commandsBySession.clear();
         baselinesBySession.clear();
         listeners.clear();

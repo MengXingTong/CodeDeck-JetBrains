@@ -21,6 +21,72 @@ final class CodexConversationProviderTest {
     private final TurnHandle handle = new TurnHandle(new SessionId("session-a"), new TurnId("local-turn"), 3);
 
     @Test
+    void cancelsBeforeTheProviderTurnIdExistsAndIgnoresLateEvents() {
+        var service = new CodexAppServerService(null);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.registerTurn(handle, "thread-a", events::add);
+            assertTrue(provider.cancel(handle));
+            provider.onNotification("turn/started", params("""
+                {"threadId":"thread-a","turn":{"id":"late-turn"}}
+                """));
+            provider.onNotification("item/agentMessage/delta", params("""
+                {"threadId":"thread-a","turnId":"late-turn","delta":"迟到回复"}
+                """));
+            assertEquals(1, events.size());
+            org.junit.jupiter.api.Assertions.assertFalse(provider.cancel(handle));
+            org.junit.jupiter.api.Assertions.assertFalse(provider.cancel(null));
+        } finally { service.dispose(); }
+    }
+
+    @Test
+    void synchronousTransportFailureIsReportedAsATurnFailure() {
+        var project = (com.intellij.openapi.project.Project) java.lang.reflect.Proxy.newProxyInstance(
+            com.intellij.openapi.project.Project.class.getClassLoader(),
+            new Class<?>[]{com.intellij.openapi.project.Project.class}, (proxy, method, args) -> null);
+        var service = new CodexAppServerService(project);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.startTurn(new TurnRequest(handle, "", "hello", java.util.List.of(), java.util.List.of(),
+                "", "", "", "never", "read-only", "", "", null), events::add);
+            var failed = assertInstanceOf(TurnEvent.Failed.class, events.getLast());
+            assertEquals(handle, failed.handle());
+            assertTrue(failed.error().getMessage().contains("尚未就绪"));
+            org.junit.jupiter.api.Assertions.assertFalse(provider.cancel(handle));
+        } finally { service.dispose(); }
+    }
+
+    @Test
+    void cancellationDuringStartupNeverDispatchesTheTurnRequest() {
+        var service = new CodexAppServerService(null);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.startTurn(new TurnRequest(handle, "existing-thread", "hello", java.util.List.of(), java.util.List.of(),
+                "", "", "", "never", "read-only", "", "", null), event -> {
+                    events.add(event);
+                    if (event instanceof TurnEvent.Started) assertTrue(provider.cancel(handle));
+                });
+            // A turn/start request would fail synchronously because the transport is disconnected.
+            assertEquals(1, events.size());
+            assertInstanceOf(TurnEvent.Started.class, events.getFirst());
+        } finally { service.dispose(); }
+    }
+
+    @Test
+    void unboundStartupCannotConsumeAnotherThreadsNotifications() {
+        var service = new CodexAppServerService(null);
+        var events = new ArrayList<TurnEvent>();
+        try (var provider = new CodexConversationProvider(service)) {
+            provider.registerTurn(handle, "", events::add);
+            provider.onNotification("turn/started", params("""
+                {"turn":{"id":"unrelated-turn"}}
+                """));
+            assertEquals(1, events.size());
+            assertTrue(provider.cancel(handle));
+        } finally { service.dispose(); }
+    }
+
+    @Test
     void decodesFixtureWithTheOriginalTurnHandle() throws IOException {
         var lines = resource("protocol/codex/turn-events.jsonl").lines().filter(line -> !line.isBlank()).toList();
 
@@ -51,6 +117,22 @@ final class CodexConversationProviderTest {
         assertEquals("commandExecution", event.kind());
         assertEquals("gradlew test", event.data().get("command"));
         assertThrows(UnsupportedOperationException.class, () -> event.data().put("status", "changed"));
+    }
+
+    @Test
+    void rawToolCallsAndOutputsShareAStableCaptureId() {
+        var call = assertInstanceOf(TurnEvent.Item.class, CodexConversationProvider.decodeNotification(handle,
+            "rawResponseItem/completed", params("""
+                {"item":{"type":"custom_tool_call","call_id":"patch-call","name":"exec","input":"literal patch input"}}
+                """)));
+        var output = assertInstanceOf(TurnEvent.Item.class, CodexConversationProvider.decodeNotification(handle,
+            "rawResponseItem/completed", params("""
+                {"item":{"type":"custom_tool_call_output","call_id":"patch-call","output":"done"}}
+                """)));
+        assertEquals("raw:patch-call", call.id()); assertEquals(call.id(), output.id());
+        assertEquals("rawToolCall", call.kind());
+        assertEquals(TurnEvent.Item.Phase.STARTED, call.phase());
+        assertEquals(TurnEvent.Item.Phase.COMPLETED, output.phase());
     }
 
     @Test

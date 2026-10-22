@@ -1,0 +1,24 @@
+// Keep real capture acceptance builds independent of other builds in the shared checkout.
+gradle.projectsLoaded {
+    gradle.rootProject.allprojects { target ->
+        def name = target == gradle.rootProject ? "plugin" : target.name
+        target.layout.buildDirectory.set(new File(gradle.rootProject.projectDir, "build/capture-validation/" + name))
+    }
+}
+
+gradle.projectsEvaluated {
+    // package.json's default outfile is fixed; override it so packaged resources use this build too.
+    def target = new File(gradle.rootProject.layout.buildDirectory.get().asFile, "generated-resources/web/app.js")
+    gradle.rootProject.tasks.named("frontendBundle").configure { task ->
+        task.args.set(["build", "--", "--outfile=" + target.absolutePath.replace('\\', '/')])
+    }
+    gradle.rootProject.tasks.named("frontendBrowserTest").configure { task ->
+        task.environment.put("CODEDECK_PREVIEW_BUNDLE", target.absolutePath)
+        def port = System.getenv("CODEDECK_TEST_PREVIEW_PORT")
+        if (!port) {
+            def socket = new java.net.ServerSocket(0, 0, java.net.InetAddress.getByName("127.0.0.1"))
+            try { port = socket.localPort.toString() } finally { socket.close() }
+        }
+        task.environment.put("PREVIEW_PORT", port)
+    }
+}

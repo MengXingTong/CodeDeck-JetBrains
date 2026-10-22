@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.codexgui"
-version = "2.0"
+version = "2.1.0"
 
 repositories {
     mavenCentral()
@@ -141,6 +141,9 @@ tasks {
     test {
         useJUnitPlatform()
         classpath = classpath.filter { it.name != "testFramework.jar" }
+        // An explicitly requested real-model acceptance run must never reuse cached test results.
+        outputs.upToDateWhen { System.getenv("CODEDECK_REAL_CAPTURE_CODEX").isNullOrBlank() }
+        outputs.cacheIf { System.getenv("CODEDECK_REAL_CAPTURE_CODEX").isNullOrBlank() }
     }
 
     withType<JavaCompile>().configureEach {

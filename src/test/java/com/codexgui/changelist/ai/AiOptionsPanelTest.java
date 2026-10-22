@@ -8,12 +8,13 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
+import static com.codexgui.settings.CodexSettingsState.AnnotationScope.*;
 
 class AiOptionsPanelTest {
     @Test void editableModelEffortAndFastAreSavedAndPassedToTheNextRequest() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var settings = new CodexSettingsState(); var published = new AtomicInteger();
-            var panel = new AiOptionsPanel(settings, List.of("model-a", "model-b"), published::incrementAndGet);
+            var panel = new AiOptionsPanel(settings, DIFF, List.of("model-a", "model-b"), published::incrementAndGet);
             combo(panel, "annotationModel").getEditor().setItem("manual-model");
             // Reading options commits typed text even before Swing has dispatched focusLost.
             assertEquals("manual-model", panel.options().model());
@@ -25,8 +26,12 @@ class AiOptionsPanelTest {
             assertTrue(command.contains("model_reasoning_effort=\"xhigh\""));
             assertTrue(command.contains("service_tier=\"fast\""));
             assertEquals(3, published.get());
-            assertTrue(settings.activeProvider("codex").customModels.contains("manual-model"));
-            var reopened = new AiOptionsPanel(settings, List.of(), () -> fail("opening must not save settings"));
+            assertTrue(settings.annotationModel(DIFF).customModels.contains("manual-model"));
+            assertFalse(settings.activeProvider("codex").customModels.contains("manual-model"));
+            assertEquals("", settings.getState().model);
+            assertEquals("high", settings.getState().reasoningEffort);
+            assertEquals("standard", settings.getState().serviceTier);
+            var reopened = new AiOptionsPanel(settings, DIFF, List.of(), () -> fail("opening must not save settings"));
             assertEquals(options, reopened.options());
             assertEquals("manual-model", combo(reopened, "annotationModel").getSelectedItem());
         });
@@ -34,7 +39,7 @@ class AiOptionsPanelTest {
     @Test void privateProviderModelsDoNotOverwriteTheLocalOrClaudeModel() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var settings = privateProviderSettings();
-            var panel = new AiOptionsPanel(settings, List.of("local-only"), () -> {});
+            var panel = new AiOptionsPanel(settings, DIFF, List.of("local-only"), () -> {});
             var model = combo(panel, "annotationModel");
             assertFalse(items(model).contains("local-only"));
             assertTrue(items(model).contains("team-choice"));
@@ -42,6 +47,7 @@ class AiOptionsPanelTest {
             assertEquals("team-choice", panel.options().model());
             assertEquals("local-model", settings.getState().model);
             assertEquals("claude-model", settings.getState().claudeModel);
+            assertEquals("team-model", settings.activeProvider("codex").model);
             assertEquals(1, settings.activeProvider("codex").revision);
             model.getEditor().setItem("");
             assertEquals("", panel.options().model(), "blank private model must never inherit the local provider model");
@@ -49,30 +55,31 @@ class AiOptionsPanelTest {
     }
     @Test void runningOptionsStayFrozenUntilTheTaskFinishesAndNeverOverwritePreferences() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
-            var settings = new CodexSettingsState(); settings.setGptInferenceOptions("before", "high", false);
-            var panel = new AiOptionsPanel(settings, List.of(), () -> fail("restoring a task must not save settings"));
+            var settings = new CodexSettingsState(); settings.setAnnotationOptions(DIFF, "before", "high", false);
+            var panel = new AiOptionsPanel(settings, DIFF, List.of(), () -> fail("restoring a task must not save settings"));
             var running = panel.options(); panel.setControlsEnabled(false);
-            settings.setGptInferenceOptions("after", "ultra", true);
+            settings.setAnnotationOptions(DIFF, "after", "ultra", true);
             assertEquals(running, panel.options());
             assertFalse(combo(panel, "annotationModel").isEnabled()); assertFalse(check(panel).isEnabled());
-            var reopened = new AiOptionsPanel(settings, List.of(), () -> fail("restore must not mutate settings"));
+            var reopened = new AiOptionsPanel(settings, DIFF, List.of(), () -> fail("restore must not mutate settings"));
             reopened.restore(running); reopened.setControlsEnabled(false);
             assertEquals(running, reopened.options());
-            assertEquals("after", settings.getState().model);
+            assertEquals("after", settings.annotationModel(DIFF).model);
             reopened.setControlsEnabled(true);
             assertEquals("after", reopened.options().model()); assertEquals("ultra", reopened.options().effort());
             assertTrue(reopened.options().fast());
         });
     }
-    @Test void changesFromChatRefreshTheControlsWithoutSavingOrResettingTypedText() throws Exception {
+    @Test void changesFromChatDoNotAlterAnnotationOptionsOrResetTypedText() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var settings = new CodexSettingsState(); var changes = new AtomicInteger();
-            var panel = new AiOptionsPanel(settings, List.of("model-a", "model-b"), () -> {});
+            settings.setAnnotationOptions(DIFF, "model-a", "medium", false);
+            var panel = new AiOptionsPanel(settings, DIFF, List.of("model-a", "model-b"), () -> {});
             panel.onChanged(changes::incrementAndGet);
             settings.setGptInferenceOptions("model-b", "low", true); panel.setControlsEnabled(true);
-            assertEquals("model-b", combo(panel, "annotationModel").getSelectedItem());
-            assertEquals("low", combo(panel, "annotationEffort").getSelectedItem()); assertTrue(check(panel).isSelected());
-            assertEquals(1, changes.get());
+            assertEquals("model-a", combo(panel, "annotationModel").getSelectedItem());
+            assertEquals("medium", combo(panel, "annotationEffort").getSelectedItem()); assertFalse(check(panel).isSelected());
+            assertEquals(0, changes.get());
             combo(panel, "annotationModel").getEditor().setItem("still-typing"); panel.setControlsEnabled(true);
             assertEquals("still-typing", combo(panel, "annotationModel").getEditor().getItem());
             assertEquals("still-typing", panel.options().model());
@@ -81,25 +88,45 @@ class AiOptionsPanelTest {
     @Test void switchingProviderBeforeAnEditIsCommittedDoesNotCopyTheOldModelIntoIt() throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             var settings = privateProviderSettings(); settings.setActiveProvider("codex", CodexSettingsState.CODEX_LOCAL_PROVIDER_ID);
-            var panel = new AiOptionsPanel(settings, List.of(), () -> fail("stale provider edit must be discarded"));
+            var panel = new AiOptionsPanel(settings, DIFF, List.of(), () -> fail("stale provider edit must be discarded"));
             combo(panel, "annotationModel").getEditor().setItem("typed-for-local");
             settings.setActiveProvider("codex", "team");
             assertEquals("team-model", panel.options().model());
             assertEquals("local-model", settings.getState().model);
         });
     }
-    @Test void localSuggestionsExcludeHiddenBlankAndDuplicateModels() {
-        assertEquals(List.of("visible", "other"), AiModelCatalog.parse("""
-            {"models":[{"slug":"visible","visibility":"list"},{"slug":"hidden","visibility":"hide"},
-            {"slug":"visible"},{"slug":" "},{"slug":"other"},{}]}
-            """));
-        assertTrue(AiModelCatalog.parse("{}").isEmpty());
+    @Test void diffAndBatchPanelsSaveIndependentOptionsAndReuseThemWhenReopened() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            var settings = new CodexSettingsState();
+            settings.setGptInferenceOptions("chat-model", "ultra", true);
+            var diff = new AiOptionsPanel(settings, DIFF, List.of(), () -> {});
+            var batch = new AiOptionsPanel(settings, BATCH, List.of(), () -> {});
+            combo(diff, "annotationModel").setSelectedItem("diff-model");
+            combo(diff, "annotationEffort").setSelectedItem("low");
+            combo(batch, "annotationModel").setSelectedItem("batch-model");
+            combo(batch, "annotationEffort").setSelectedItem("xhigh");
+            check(batch).doClick();
+            assertEquals("diff-model", diff.options().model());
+            assertEquals("low", diff.options().effort());
+            assertFalse(diff.options().fast());
+            assertEquals("batch-model", batch.options().model());
+            assertEquals("xhigh", batch.options().effort());
+            assertTrue(batch.options().fast());
+            assertEquals(diff.options(), new AiOptionsPanel(settings, DIFF, List.of(), () -> {}).options());
+            assertEquals(batch.options(), new AiOptionsPanel(settings, BATCH, List.of(), () -> {}).options());
+            assertEquals("chat-model", settings.getState().model);
+            assertEquals("ultra", settings.getState().reasoningEffort);
+            assertEquals("fast", settings.getState().serviceTier);
+            assertFalse(settings.annotationModel(BATCH).customModels.contains("diff-model"));
+        });
     }
     private static CodexSettingsState privateProviderSettings() {
         var settings = new CodexSettingsState(); settings.getState().model = "local-model"; settings.getState().claudeModel = "claude-model";
         var profile = new CodexSettingsState.ProviderProfile("team", "codex", "Team", false);
         profile.model = "team-model"; profile.customModels.add("team-choice"); settings.getState().providers.add(profile);
-        settings.setActiveProvider("codex", "team"); return settings;
+        settings.setActiveProvider("codex", "team");
+        settings.setAnnotationOptions(DIFF, "team-model", "high", false);
+        return settings;
     }
     private static JComboBox<?> combo(AiOptionsPanel panel, String name) {
         return (JComboBox<?>) Arrays.stream(panel.getComponents()).filter(c -> name.equals(c.getName())).findFirst().orElseThrow();

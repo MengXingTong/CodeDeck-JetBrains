@@ -9,8 +9,68 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static com.codexgui.settings.CodexSettingsState.AnnotationScope.*;
 
 class CodexSettingsStateTest {
+    @Test void lineEndingGuardDefaultsOnAndPersistsAnExplicitConversionOptOut() {
+        var settings = new CodexSettingsState();
+        assertTrue(settings.getState().preserveFileLineEndings);
+        settings.getState().preserveFileLineEndings = false;
+        var xml = com.intellij.util.xmlb.XmlSerializer.serialize(settings.getState());
+        var reopened = new CodexSettingsState();
+        reopened.loadState(com.intellij.util.xmlb.XmlSerializer.deserialize(xml, CodexSettingsState.StateData.class));
+        assertFalse(reopened.getState().preserveFileLineEndings);
+    }
+    @Test void migratesSharedOptionsOnceThenPersistsThreeIndependentContexts() {
+        var legacy = new CodexSettingsState.StateData();
+        legacy.schemaVersion = 2;
+        legacy.model = "old-model";
+        legacy.reasoningEffort = "xhigh";
+        legacy.serviceTier = "fast";
+        var settings = new CodexSettingsState();
+        settings.loadState(legacy);
+        assertEquals("old-model", settings.annotationModel(DIFF).model);
+        assertEquals("old-model", settings.annotationModel(BATCH).model);
+        assertEquals("xhigh", settings.annotationPreferences(DIFF).reasoningEffort);
+        assertTrue(settings.annotationPreferences(BATCH).fast);
+
+        settings.setAnnotationOptions(DIFF, "diff-model", "low", false);
+        settings.annotationModel(DIFF).customModels.add("diff-only");
+        settings.setAnnotationOptions(BATCH, "batch-model", "high", true);
+        settings.setGptInferenceOptions("chat-model", "ultra", false);
+        var xml = com.intellij.util.xmlb.XmlSerializer.serialize(settings.getState());
+        var reopened = new CodexSettingsState();
+        reopened.loadState(com.intellij.util.xmlb.XmlSerializer.deserialize(xml, CodexSettingsState.StateData.class));
+        assertEquals("diff-model", reopened.annotationModel(DIFF).model);
+        assertEquals("low", reopened.annotationPreferences(DIFF).reasoningEffort);
+        assertFalse(reopened.annotationPreferences(DIFF).fast);
+        assertEquals(List.of("diff-only"), reopened.annotationModel(DIFF).customModels);
+        assertEquals("batch-model", reopened.annotationModel(BATCH).model);
+        assertEquals("high", reopened.annotationPreferences(BATCH).reasoningEffort);
+        assertTrue(reopened.annotationPreferences(BATCH).fast);
+        assertFalse(reopened.annotationModel(BATCH).customModels.contains("diff-only"));
+        assertEquals("chat-model", reopened.getState().model);
+        assertEquals("ultra", reopened.getState().reasoningEffort);
+    }
+
+    @Test void annotationModelsAreRememberedPerProviderWithoutTouchingChatSelections() {
+        var settings = new CodexSettingsState();
+        settings.setAnnotationOptions(DIFF, "local-diff", "low", false);
+        var custom = new CodexSettingsState.ProviderProfile("custom", "codex", "Custom", false);
+        custom.model = "chat-custom";
+        settings.getState().providers.add(custom);
+        settings.setActiveProvider("codex", custom.id);
+        assertEquals("chat-custom", settings.annotationModel(DIFF).model);
+        settings.setAnnotationOptions(DIFF, "custom-diff", "medium", true);
+        settings.setAnnotationOptions(BATCH, "custom-batch", "high", false);
+        settings.setActiveProvider("codex", CodexSettingsState.CODEX_LOCAL_PROVIDER_ID);
+        assertEquals("local-diff", settings.annotationModel(DIFF).model);
+        assertEquals("chat-custom", custom.model);
+        settings.setActiveProvider("codex", custom.id);
+        assertEquals("custom-diff", settings.annotationModel(DIFF).model);
+        assertEquals("custom-batch", settings.annotationModel(BATCH).model);
+    }
     @Test
     void restoresBuiltInProvidersWhenMigratingOldSettings() {
         var component = new CodexSettingsState();

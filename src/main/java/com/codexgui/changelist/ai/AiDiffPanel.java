@@ -53,7 +53,8 @@ public final class AiDiffPanel extends JPanel implements Disposable {
     AiDiffPanel(Project project, Path path, ContentDiffRequest request, EditorDiffViewer viewer) {
         super(new BorderLayout()); this.project = project; this.path = path; this.request = request; this.viewer = viewer;
         store = project.getService(AiSessionStore.class);
-        options = new AiOptionsPanel(); options.onChanged(this::loadContext);
+        options = new AiOptionsPanel(com.codexgui.settings.CodexSettingsState.AnnotationScope.DIFF);
+        options.onChanged(this::loadContext);
         add(options, BorderLayout.NORTH);
         var buttons = new JPanel(new FlowLayout(FlowLayout.LEADING, 6, 3)); buttons.add(generate); buttons.add(regenerate); buttons.add(stop);
         var actions = new JPanel(new BorderLayout()); actions.add(buttons, BorderLayout.WEST);

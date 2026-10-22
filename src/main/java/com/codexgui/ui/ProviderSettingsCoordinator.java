@@ -5,6 +5,7 @@ import com.codexgui.conversation.SessionRegistry;
 import com.codexgui.service.AttentionService;
 import com.codexgui.service.ClaudeCodeService;
 import com.codexgui.service.CodexAppServerService;
+import com.codexgui.service.CodexModelCatalog;
 import com.codexgui.service.NotificationSoundPlayer;
 import com.codexgui.service.ProviderModelService;
 import com.codexgui.settings.CodexProjectSettingsState;
@@ -54,6 +55,8 @@ final class ProviderSettingsCoordinator implements Disposable {
     private final SessionRegistry sessionRegistry;
     private final ProviderModelService providerModelService = new ProviderModelService();
     private final Listener listener;
+    private final CompletableFuture<List<String>> localModelCatalog;
+    private volatile boolean disposed;
 
     private final ConcurrentHashMap<String, JsonArray> providerModelOptions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String> activatingProviderByChannel = new ConcurrentHashMap<>();
@@ -68,6 +71,15 @@ final class ProviderSettingsCoordinator implements Disposable {
         SessionRegistry sessionRegistry,
         Listener listener
     ) {
+        this(project, owner, root, codex, claude, attentionService, sessionRegistry, listener,
+            CompletableFuture.supplyAsync(CodexModelCatalog::load, AppExecutorUtil.getAppExecutorService()));
+    }
+
+    ProviderSettingsCoordinator(
+        Project project, JPanel owner, Path root, CodexAppServerService codex, ClaudeCodeService claude,
+        AttentionService attentionService, SessionRegistry sessionRegistry, Listener listener,
+        CompletableFuture<List<String>> localModelCatalog
+    ) {
         this.project = project;
         this.owner = owner;
         this.root = root;
@@ -76,6 +88,7 @@ final class ProviderSettingsCoordinator implements Disposable {
         this.attentionService = attentionService;
         this.sessionRegistry = sessionRegistry;
         this.listener = listener;
+        this.localModelCatalog = localModelCatalog;
     }
 
     void loadModels() {
@@ -90,10 +103,23 @@ final class ProviderSettingsCoordinator implements Disposable {
         }
         // Claude 本地配置由 CLI 在首个回合回填真实模型，不预设静态模型目录。
         if (Objects.equals(channel, CodexSettingsState.CLAUDE_CHANNEL)) return;
-        // Codex CLI 尚未完成 initialize 时不能发送请求，等待连接事件重新加载。
-        if (!codex.isConnected()) return;
         var profileId = profile.id;
         var profileRevision = profile.revision;
+        // 与 Diff 共用本机目录；不等待连接，也不把缓存建议写成用户选择。
+        localModelCatalog.thenAccept(modelIds -> ApplicationManager.getApplication().invokeLater(() -> {
+            var current = CodexSettingsState.getInstance().provider(profileId);
+            if (disposed || current == null || current.revision != profileRevision || modelIds.isEmpty()) return;
+            var models = new JsonArray();
+            modelIds.forEach(models::add);
+            // 接口目录优先，迟到的磁盘读取不能覆盖已刷新的列表。
+            if (providerModelOptions.putIfAbsent(profileId, models) == null
+                && Objects.equals(activeSession().provider(), channel)
+                && Objects.equals(CodexSettingsState.getInstance().activeProviderId(channel), profileId)) {
+                listener.modelOptionsChanged();
+            }
+        }));
+        // Codex CLI 尚未完成 initialize 时不能发送请求，等待连接事件重新加载。
+        if (!codex.isConnected()) return;
         codex.listModels().thenAccept(result -> {
             var modelIds = new ArrayList<String>();
             String defaultModel = null;
@@ -335,6 +361,7 @@ final class ProviderSettingsCoordinator implements Disposable {
             case "showThinking" -> settings.showThinking = bool(request, "value", true);
             case "sendOpenedFilePath" -> settings.sendOpenedFilePath = bool(request, "value", false);
             case "diffExpandedByDefault" -> settings.diffExpandedByDefault = bool(request, "value", false);
+            case "preserveFileLineEndings" -> settings.preserveFileLineEndings = bool(request, "value", true);
             case "newSessionConfirmEnabled" -> settings.newSessionConfirmEnabled = bool(request, "value", true);
             case "askUserQuestionNotificationEnabled" -> settings.askUserQuestionNotificationEnabled = bool(request, "value", false);
             case "askUserQuestionSoundEnabled" -> settings.askUserQuestionSoundEnabled = bool(request, "value", false);
@@ -603,12 +630,15 @@ final class ProviderSettingsCoordinator implements Disposable {
 
     String sharedInstructions(CodexSettingsState.StateData settings) {
         if (!settings.projectInstructions.isBlank()) return settings.projectInstructions;
-        var projectInstructions = CodexProjectSettingsState.getInstance(project).getState().projectInstructions;
+        // 旧项目级服务可能尚不可用，迁移不能阻断整个聊天设置和模型列表的发布。
+        var projectSettings = project == null ? null : CodexProjectSettingsState.getInstance(project);
+        if (projectSettings == null) return "";
+        var projectInstructions = projectSettings.getState().projectInstructions;
         if (projectInstructions.isBlank()) return "";
 
         // 旧版项目级配置迁移到统一用户配置，迁移后清空原存储避免重复拼接。
         settings.projectInstructions = projectInstructions.trim();
-        CodexProjectSettingsState.getInstance(project).getState().projectInstructions = "";
+        projectSettings.getState().projectInstructions = "";
         return settings.projectInstructions;
     }
 
@@ -639,6 +669,7 @@ final class ProviderSettingsCoordinator implements Disposable {
     }
 
     private void applyModelOptions(String profileId, int profileRevision, List<String> modelIds, String defaultModel) {
+        if (disposed) return;
         var settingsService = CodexSettingsState.getInstance();
         var profile = settingsService.provider(profileId);
         if (profile == null || profile.revision != profileRevision || modelIds.isEmpty()) return;
@@ -837,6 +868,7 @@ final class ProviderSettingsCoordinator implements Disposable {
 
     @Override
     public void dispose() {
+        disposed = true;
         providerModelOptions.clear();
         activatingProviderByChannel.clear();
     }

@@ -33,7 +33,7 @@ public final class AiBatchDialog extends DialogWrapper {
     public AiBatchDialog(Project project, List<AiBatchState.Source> sources, Consumer<AiBatchState.Source> open) {
         super(project, false); this.project = project; this.open = open;
         store = project.getService(AiSessionStore.class); state = store.batchFor(sources);
-        options = new AiOptionsPanel();
+        options = new AiOptionsPanel(com.codexgui.settings.CodexSettingsState.AnnotationScope.BATCH);
         if (state.running()) options.restore(state.options());
         setTitle("AI 注释 · " + state.sources().size() + " 个文件"); setModal(false); setCancelButtonText("关闭");
         state.sources().forEach(ignored -> rows.addElement("")); init();
