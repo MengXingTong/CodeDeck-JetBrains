@@ -2,6 +2,8 @@
 
 English | [简体中文](README.zh-CN.md)
 
+Current build: **2.1.4**.
+
 **Understand and review code in JetBrains IDEs, with AI assistance.**
 
 CodeDeck helps you inspect changes, understand the code through AI explanations and follow-up questions, and decide which edits to keep.
@@ -17,7 +19,13 @@ CodeDeck helps you inspect changes, understand the code through AI explanations 
 
 The interface supports English and Simplified Chinese and follows the IDE language after restart. Other IDE languages use English.
 
+File context follows the active IDE editor across new and switched chat tabs, including selected line ranges and diff versions. Each tab keeps its own draft. Close the editor or remove the file context to clear it.
+
 During a running task, Send and the send shortcut add messages to the ordered queue above the input box. Edit or delete any unsent message, or click **Steer now** on the first item to guide the current Codex turn immediately. An item being edited waits for Save or Cancel before sending; files, attachments, and captured editor context are preserved. Messages enter the conversation when sent.
+
+Command fallback capture filters logs, build outputs, and paths excluded by the project's **ChangeList → Ignore list / resume tracking** rules. Known read-only commands do not claim concurrent file changes. Explicit patches, file edits, and recognized writes to literal file paths remain captured, including ignored files. Rule changes apply to subsequent turns.
+
+Codex history opens as a saved snapshot without claiming the original chat. Use **Refresh history** to read updates, **Continue original chat** to resume it when available, or **Copy to a new chat** to continue independently while another client holds the original. These actions preserve your input draft and attached files.
 
 ## Screenshots
 

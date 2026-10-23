@@ -21,6 +21,52 @@ final class ConversationChangeTrackerTest {
     @TempDir
     Path root;
 
+    @Test void inferredNoiseNeverEntersTheChangeListOrBatchRollbackButExplicitEditsRemainReversible() throws IOException {
+        Files.createDirectories(root.resolve("Source"));
+        var header = write("Source/file.cpp", "before\n");
+        var log = write("Source/build.log", "old log\n");
+        var library = write("Source/UnrealEditor.lib", "old library");
+        var tracker = new ConversationChangeTracker(root);
+        tracker.commandStarted("session", "generator", "generator Source", null);
+        Files.writeString(header, "after\n"); Files.writeString(log, "background log\n"); Files.delete(library);
+        assertEquals(List.of(header), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
+        tracker.commandCompleted("session", "generator");
+        tracker.revertAll("session");
+        assertEquals("before\n", Files.readString(header));
+        assertEquals("background log\n", Files.readString(log)); assertFalse(Files.exists(library));
+
+        tracker.commandStarted("session", "read", "rg -n pattern Source", null);
+        Files.writeString(header, "user edit\n");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        tracker.commandCompleted("session", "read");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+
+        assertTrue(tracker.trackBeforeWrite("session", log.toString()));
+        Files.writeString(log, "explicit edit\n"); tracker.finishCommands("session");
+        assertEquals(List.of(log), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
+        tracker.revertAll("session"); assertEquals("background log\n", Files.readString(log));
+    }
+
+    @Test void projectIgnoresAndRestoredPathsApplyOnlyToInferredChanges() throws IOException {
+        Files.createDirectories(root.resolve("Source/Custom"));
+        var kept = write("Source/Custom/keep.cpp", "keep before\n");
+        var excluded = write("Source/Custom/excluded.cpp", "excluded before\n");
+        var rules = new com.codexgui.changelist.core.IgnoreRules(com.codexgui.changelist.core.ProjectScope.of(root),
+            List.of(), "Custom/\n**/Custom/\n", List.of(), List.of("Source/Custom/keep.cpp"));
+        var tracker = new ConversationChangeTracker(root, () -> true,
+            (path, directory) -> directory ? rules.canSkipDirectory(path) : rules.isIgnored(path));
+        tracker.commandStarted("session", "scope", "generator Source", null);
+        Files.writeString(kept, "keep after\n"); Files.writeString(excluded, "background\n");
+        tracker.commandCompleted("session", "scope");
+        assertEquals(List.of(kept), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
+        tracker.revertAll("session"); assertEquals("background\n", Files.readString(excluded));
+
+        tracker.patchStarted("session", "patch", List.of(excluded.toString()));
+        Files.writeString(excluded, "explicit patch\n"); tracker.patchCompleted("session", "patch");
+        assertEquals(List.of(excluded), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
+        tracker.revertAll("session"); assertEquals("background\n", Files.readString(excluded));
+    }
+
     @Test void resolvesGitRevertFilesInThePluginRuntime() throws Exception {
         var repository = Files.createDirectories(root.resolve("repo"));
         for (var args : List.of(List.of("init", "--quiet"), List.of("config", "user.name", "Test"),

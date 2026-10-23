@@ -28,7 +28,7 @@ public final class IgnoreListEditor extends JPanel {
     public IgnoreListEditor(Project project) {
         super(new BorderLayout(0, JBUI.scale(8)));
         this.project = project;
-        add(new JBLabel(UiMessages.message("<html>忽略列表只控制本侧栏的展示，适用于所有变更文件。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>")), BorderLayout.NORTH);
+        add(new JBLabel(UiMessages.message("<html>忽略列表控制本侧栏展示，并过滤聊天中的命令推测捕获；AI 明确修改的文件仍会捕获。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>")), BorderLayout.NORTH);
         var tabs = new JTabbedPane();
         tabs.addTab(UiMessages.message("GitHub 默认模板"), templatePanel());
         JPanel custom = new JPanel(new BorderLayout(0, JBUI.scale(5)));

@@ -12,8 +12,10 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.regex.Pattern;
 
 /** Bounded, command-local fallback for shell edits that have no provider fileChange event. */
@@ -29,18 +31,29 @@ public final class CommandFileCapture {
     private static final Pattern FILE_NAME = Pattern.compile(".*\\.[\\p{L}\\p{N}_+-]{1,32}");
     private static final Pattern SCRIPT = Pattern.compile("(?i).*\\.(?:mjs|cjs|js|py|ps1|sh|cmd|bat)$");
     private static final Pattern RENAME = Pattern.compile("(?i)\\b(?:Rename-Item|ren|rename)\\s+(?:(?:-LiteralPath|-Path)\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)\\s+(?:-NewName\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)");
+    private static final Set<String> GENERATED_DIRECTORIES = Set.of("binaries", "intermediate", "deriveddatacache",
+        "node_modules", ".gradle", ".vs", "__pycache__", ".pytest_cache", ".mypy_cache", "library", "temp", "logs",
+        "obj", "bin", "build", "dist", "out", "target");
+    private static final Set<String> GENERATED_EXTENSIONS = Set.of("log", "tlog", "tmp", "temp", "cache", "obj", "o",
+        "lib", "a", "dll", "exe", "so", "dylib", "pdb", "pch", "ilk", "exp", "class", "pyc", "pyo");
 
     public record Before(Path path, boolean exists, byte[] bytes, boolean preserveFormat) {
         public Before(Path path, boolean exists, byte[] bytes) { this(path, exists, bytes, true); }
     }
     private record Pending(List<Before> files, Map<Path, Set<Path>> directories, Set<Path> forgotten, boolean preserveFormat) { }
     private final WorkspacePathPolicy paths;
+    private final BiPredicate<Path, Boolean> projectIgnores;
     private final Map<String, Pending> pending = new LinkedHashMap<>();
     private final Map<Path, Before> turnBaseline = new LinkedHashMap<>();
     private final Map<byte[], Integer> references = new java.util.IdentityHashMap<>();
     private long retainedBytes;
 
-    public CommandFileCapture(Path root) { paths = new WorkspacePathPolicy(root); }
+    public CommandFileCapture(Path root) { this(root, (path, directory) -> false); }
+
+    public CommandFileCapture(Path root, BiPredicate<Path, Boolean> projectIgnores) {
+        paths = new WorkspacePathPolicy(root);
+        this.projectIgnores = projectIgnores;
+    }
 
     /** Snapshot bounded Git metadata paths before the model can start a fast external mutation. */
     public synchronized void prepare() {
@@ -72,13 +85,20 @@ public final class CommandFileCapture {
     public synchronized void started(String id, List<ShellCommandInput> inputs) {
         if (id == null || id.isBlank() || pending.containsKey(id) || pending.size() >= MAX_COMMANDS) return;
         var candidates = new LinkedHashSet<Path>();
+        var explicitFiles = new LinkedHashSet<Path>();
         boolean preserveFormat = inputs.stream().noneMatch(input -> VcsCommandPaths.restores(input.command()));
         for (var input : inputs.stream().limit(16).toList()) {
-            candidates.addAll(candidates(input.command(), input.cwd()));
+            for (var segment : ShellCaptureIntent.captureSegments(input.command())) {
+                var mentioned = candidates(segment, input.cwd());
+                candidates.addAll(mentioned);
+                for (var writing : ShellCaptureIntent.explicitWriteSegments(segment))
+                    explicitFiles.addAll(candidates(writing, input.cwd()));
+            }
             try {
                 var base = input.cwd() == null || input.cwd().isBlank() ? paths.root() : Path.of(input.cwd());
                 if (!base.isAbsolute()) base = paths.root().resolve(base);
-                candidates.addAll(VcsCommandPaths.resolve(input.command(), base, paths));
+                var restored = VcsCommandPaths.resolve(input.command(), base, paths);
+                candidates.addAll(restored); explicitFiles.addAll(restored);
             } catch (RuntimeException ignored) { }
         }
         var directories = new LinkedHashMap<Path, Set<Path>>();
@@ -89,8 +109,9 @@ public final class CommandFileCapture {
             // Git's -C directory is not a request to snapshot its entire worktree or database.
             if (!preserveFormat && Files.isDirectory(path)) continue;
             var directory = Files.isDirectory(path) || !Files.exists(path) && !path.getFileName().toString().contains(".")
-                ? path : SCRIPT.matcher(path.toString()).matches() ? path.getParent() : null;
-            if (directory == null || paths.normalize(directory) == null || directories.keySet().stream().anyMatch(directory::startsWith)) continue;
+                ? path : !explicitFiles.contains(path) && SCRIPT.matcher(path.toString()).matches() ? path.getParent() : null;
+            if (directory == null || paths.normalize(directory) == null || ignored(directory, true)
+                || directories.keySet().stream().anyMatch(directory::startsWith)) continue;
             var names = directoryFiles(directory, scopeBudget);
             if (names == null || names.size() > MAX_PATHS - directories.values().stream().mapToInt(Set::size).sum()) continue;
             directories.put(directory, names);
@@ -102,6 +123,8 @@ public final class CommandFileCapture {
             try {
                 // A missing regular file is a possible addition. Directories and links are never snapshotted.
                 if (metadata(path) || Files.isSymbolicLink(path) || Files.isDirectory(path)) continue;
+                // Ignore only inferred paths; a recognized direct write keeps its real baseline.
+                if (!explicitFiles.contains(path) && ignored(path, false)) continue;
                 var early = preserveFormat ? null : turnBaseline.get(path);
                 if (early != null) {
                     before.add(early);
@@ -201,12 +224,12 @@ public final class CommandFileCapture {
                     complete[0] = false; return FileVisitResult.TERMINATE;
                 }
                 @Override public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attributes) {
-                    if (metadata(dir) || paths.normalize(dir) == null || Files.isSymbolicLink(dir)) return FileVisitResult.SKIP_SUBTREE;
+                    if (metadata(dir) || paths.normalize(dir) == null || Files.isSymbolicLink(dir) || ignored(dir, true)) return FileVisitResult.SKIP_SUBTREE;
                     return count();
                 }
                 @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
                     if (attributes.isDirectory()) complete[0] = false; // depth bound reached
-                    if (!metadata(file) && attributes.isRegularFile() && paths.normalize(file) != null) found.add(file);
+                    if (!metadata(file) && attributes.isRegularFile() && paths.normalize(file) != null && !ignored(file, false)) found.add(file);
                     return count();
                 }
                 @Override public FileVisitResult visitFileFailed(Path file, IOException error) {
@@ -246,6 +269,20 @@ public final class CommandFileCapture {
         for (var part : paths.root().relativize(path))
             if (List.of(".git", ".hg", ".svn").contains(part.toString().toLowerCase(java.util.Locale.ROOT))) return true;
         return false;
+    }
+
+    private boolean ignored(Path path, boolean directory) {
+        var relative = paths.root().relativize(path).toString().replace('\\', '/').toLowerCase(Locale.ROOT);
+        var parts = relative.split("/");
+        for (int i = 0; i < parts.length - (directory ? 0 : 1); i++)
+            if (GENERATED_DIRECTORIES.contains(parts[i])) return true;
+        if (relative.matches("(?:.*/)?saved/(?:crashes|autosaves|cooked|stagedbuilds)(?:/.*)?")) return true;
+        if (!directory) {
+            String name = parts[parts.length - 1];
+            int dot = name.lastIndexOf('.');
+            if (dot >= 0 && GENERATED_EXTENSIONS.contains(name.substring(dot + 1))) return true;
+        }
+        return projectIgnores.test(path, directory);
     }
 
     private static String unquote(String value) {

@@ -4,6 +4,8 @@ import com.codexgui.i18n.UiMessages;
 
 import com.codexgui.model.ChangeEntry;
 import com.codexgui.settings.CodexSettingsState;
+import com.codexgui.changelist.core.ProjectScope;
+import com.codexgui.changelist.settings.SidebarSettings;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.WriteAction;
@@ -36,6 +38,8 @@ import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.BooleanSupplier;
+import java.util.function.BiPredicate;
+import java.util.function.Supplier;
 
 @Service(Service.Level.PROJECT)
 public final class ConversationChangeTracker implements Disposable {
@@ -72,6 +76,7 @@ public final class ConversationChangeTracker implements Disposable {
     private final Path root;
     private final WorkspacePathPolicy pathPolicy;
     private final BooleanSupplier preserveLineEndings;
+    private final Supplier<BiPredicate<Path, Boolean>> captureIgnores;
     private final Map<String, LinkedHashMap<Path, Baseline>> baselinesBySession = new LinkedHashMap<>();
     private final Map<String, CommandFileCapture> commandsBySession = new LinkedHashMap<>();
     private final Map<String, Map<String, Map<Path, Baseline>>> pendingCommands = new LinkedHashMap<>();
@@ -84,6 +89,10 @@ public final class ConversationChangeTracker implements Disposable {
         this.root = Path.of(project.getBasePath() == null ? "." : project.getBasePath()).toAbsolutePath().normalize();
         this.pathPolicy = new WorkspacePathPolicy(root);
         this.preserveLineEndings = () -> CodexSettingsState.getInstance().getState().preserveFileLineEndings;
+        this.captureIgnores = () -> {
+            var rules = project.getService(SidebarSettings.class).snapshot().ignoreRules(ProjectScope.of(root));
+            return (path, directory) -> directory ? rules.canSkipDirectory(path) : rules.isIgnored(path);
+        };
         installListeners();
     }
 
@@ -92,10 +101,15 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     ConversationChangeTracker(Path root, BooleanSupplier preserveLineEndings) {
+        this(root, preserveLineEndings, (path, directory) -> false);
+    }
+
+    ConversationChangeTracker(Path root, BooleanSupplier preserveLineEndings, BiPredicate<Path, Boolean> captureIgnores) {
         this.project = null;
         this.root = root.toAbsolutePath().normalize();
         this.pathPolicy = new WorkspacePathPolicy(this.root);
         this.preserveLineEndings = preserveLineEndings;
+        this.captureIgnores = () -> captureIgnores;
     }
 
     public static ConversationChangeTracker getInstance(@NotNull Project project) {
@@ -135,7 +149,7 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     public synchronized void prepareCommands(String sessionId, List<Path> repositories) {
-        commandsBySession.computeIfAbsent(sessionKey(sessionId), ignored -> new CommandFileCapture(root)).prepare(repositories);
+        commandsBySession.computeIfAbsent(sessionKey(sessionId), ignored -> newCommandCapture()).prepare(repositories);
     }
 
     public synchronized void commandStarted(String sessionId, String id, String command, String cwd) {
@@ -147,7 +161,7 @@ public final class ConversationChangeTracker implements Disposable {
         var key = sessionKey(sessionId);
         var pending = pendingCommands.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
         if (pending.containsKey(id) || pending.size() >= 16) return;
-        var capture = commandsBySession.computeIfAbsent(key, ignored -> new CommandFileCapture(root));
+        var capture = commandsBySession.computeIfAbsent(key, ignored -> newCommandCapture());
         capture.started(id, inputs);
         var reserved = new LinkedHashMap<Path, Baseline>();
         var baselines = baselinesBySession.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
@@ -159,6 +173,8 @@ public final class ConversationChangeTracker implements Disposable {
         }
         pending.put(id, reserved);
     }
+
+    private CommandFileCapture newCommandCapture() { return new CommandFileCapture(root, captureIgnores.get()); }
 
     public synchronized void commandCompleted(String sessionId, String id) {
         var capture = commandsBySession.get(sessionKey(sessionId));

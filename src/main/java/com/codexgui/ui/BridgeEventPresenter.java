@@ -366,8 +366,7 @@ final class BridgeEventPresenter {
     void addBehaviorSettings(
         JsonObject state,
         CodexSettingsState.StateData settings,
-        ConversationSession session,
-        EditorFileContext context
+        ConversationSession session
     ) {
         state.addProperty("sendShortcut", settings.sendShortcut);
         state.addProperty("permissionDialogTimeoutSeconds", settings.permissionDialogTimeoutSeconds);
@@ -383,10 +382,8 @@ final class BridgeEventPresenter {
         state.addProperty("soundOnlyWhenUnfocused", settings.soundOnlyWhenUnfocused);
         state.addProperty("notificationSound", settings.notificationSound);
         state.addProperty("customSoundPath", settings.customSoundPath);
-        state.addProperty("activeFile", context == null ? "" : context.path());
-        state.addProperty("activeFileStartLine", context == null ? 0 : context.startLine());
-        state.addProperty("activeFileEndLine", context == null ? 0 : context.endLine());
-        state.addProperty("activeFileSelectionLabel", context == null ? "" : context.selectionLabel());
+        // Editor context belongs to the workspace. Session/settings snapshots must not
+        // replace it when a new tab refreshes settings with focus inside the chat.
         state.addProperty("usageUsedTokens", session.usageUsedTokens());
         state.addProperty("usageMaxTokens", session.usageMaxTokens());
         state.addProperty("usagePercentage", session.usageMaxTokens() > 0

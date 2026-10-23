@@ -73,10 +73,17 @@ export function createStore<TState, TEvent>(
 
 export function reduceBridgeEvent(state: BridgeState, event: ReducedEvent): BridgeState {
   switch (event.type) {
-    case 'bootstrap':
-      Object.assign(state, object(event.state));
+    case 'bootstrap': {
+      const snapshot = {...object(event.state)};
+      // Only fileContext events update the workspace editor. A delayed settings
+      // snapshot can contain an empty or older file from before a tab switch.
+      for (const key of ['activeFile', 'activeFileStartLine', 'activeFileEndLine', 'activeFileSelectionLabel']) {
+        delete snapshot[key];
+      }
+      Object.assign(state, snapshot);
       state.messages = state.messages.map(message => withCreatedAt(message));
       break;
+    }
     case 'connection':
       state.connected = Boolean(event.connected);
       break;

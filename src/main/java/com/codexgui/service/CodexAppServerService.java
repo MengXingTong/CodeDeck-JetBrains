@@ -200,7 +200,7 @@ public final class CodexAppServerService implements Disposable {
             var clientInfo = new JsonObject();
             clientInfo.addProperty("name", "codedeck-jetbrains");
             clientInfo.addProperty("title", "CodeDeck for JetBrains");
-            clientInfo.addProperty("version", "2.1.3");
+            clientInfo.addProperty("version", "2.1.4");
             var params = new JsonObject();
             params.add("clientInfo", clientInfo);
             params.add("capabilities", capabilities);
@@ -413,6 +413,23 @@ public final class CodexAppServerService implements Disposable {
     ) {
         var params = new JsonObject();
         params.addProperty("threadId", threadId);
+        params.addProperty("includeTurns", false);
+        // 浏览和刷新只读取已保存历史，不加载会话或争用其他客户端的写入权。
+        return request.apply("thread/read", params).thenCompose(result -> {
+            result.addProperty("historyReadOnly", true);
+            return loadHistoryTurns(threadId, result, request);
+        });
+    }
+
+    public CompletableFuture<JsonObject> resumeHistoryThread(String threadId) {
+        return resumeHistoryThread(threadId, this::request);
+    }
+
+    static CompletableFuture<JsonObject> resumeHistoryThread(
+        String threadId, BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request
+    ) {
+        var params = new JsonObject();
+        params.addProperty("threadId", threadId);
         params.addProperty("excludeTurns", true);
         return request.apply("thread/resume", params).handle((result, error) -> {
             if (error == null) {
@@ -435,13 +452,39 @@ public final class CodexAppServerService implements Disposable {
                 snapshot.addProperty("historyReadOnly", true);
                 return snapshot;
             });
-        }).thenCompose(Function.identity()).thenCompose(result -> {
-            var turns = new JsonArray();
-            return listThreadTurns(threadId, null, turns, request).thenApply(ignored -> {
-                var thread = result.getAsJsonObject("thread");
-                if (thread != null) thread.add("turns", turns);
-                return result;
-            });
+        }).thenCompose(Function.identity()).thenCompose(result -> loadHistoryTurns(threadId, result, request));
+    }
+
+    public CompletableFuture<JsonObject> forkHistoryThread(String threadId) {
+        return forkHistoryThread(threadId, this::request);
+    }
+
+    static CompletableFuture<JsonObject> forkHistoryThread(
+        String threadId, BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request
+    ) {
+        var params = new JsonObject();
+        params.addProperty("threadId", threadId);
+        params.addProperty("excludeTurns", true);
+        // 原生分叉复制已保存的上下文，不需要恢复或释放原会话。
+        return request.apply("thread/fork", params).thenCompose(result -> {
+            var thread = result.getAsJsonObject("thread");
+            if (thread == null || !thread.has("id") || thread.get("id").isJsonNull()
+                || thread.get("id").getAsString().isBlank() || threadId.equals(thread.get("id").getAsString())) {
+                return CompletableFuture.failedFuture(new IOException("thread/fork did not return a new thread id"));
+            }
+            result.addProperty("historyReadOnly", false);
+            return loadHistoryTurns(thread.get("id").getAsString(), result, request);
+        });
+    }
+
+    private static CompletableFuture<JsonObject> loadHistoryTurns(
+        String threadId, JsonObject result, BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request
+    ) {
+        var turns = new JsonArray();
+        return listThreadTurns(threadId, null, turns, request).thenApply(ignored -> {
+            var thread = result.getAsJsonObject("thread");
+            if (thread != null) thread.add("turns", turns);
+            return result;
         });
     }
 

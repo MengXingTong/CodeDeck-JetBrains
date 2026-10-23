@@ -2,7 +2,7 @@ export const BRIDGE_VERSION = 1 as const;
 
 export const BRIDGE_COMMAND_TYPES = [
   'ready', 'reconnect', 'send', 'steer', 'queuedInput', 'stop', 'new', 'closeSession', 'activateSession',
-  'history', 'openThread', 'rename', 'export', 'pickFile', 'pickImage', 'dropFiles',
+  'history', 'openThread', 'resumeThread', 'forkThread', 'rename', 'export', 'pickFile', 'pickImage', 'dropFiles',
   'cancelDrop', 'composerBounds', 'listProjectFiles', 'removeAttachment', 'removeFileReference',
   'removeFileReferences', 'addFileReferences', 'reorderFileReferences', 'acceptChange',
   'revertChange', 'acceptAll', 'revertAll', 'openChange', 'openChangeLocation', 'compact', 'review', 'rewind',

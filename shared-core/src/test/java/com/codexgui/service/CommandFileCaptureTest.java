@@ -14,6 +14,124 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandFileCaptureTest {
     @TempDir Path root;
 
+    @Test void inferredScopesExcludeBackgroundLogsAndBuildOutputsBeforeReservingBaselines() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var header = Files.writeString(source.resolve("BattleInMatchTaskComponent.h"), "before");
+        var log = Files.writeString(source.resolve("InMatchUnifiedInteractionBuild20261023.log"), "old log");
+        var library = Files.write(source.resolve("UnrealEditor-GAbilitySystem.LIB"), new byte[]{1, 0, 2});
+        var generated = Files.createDirectories(source.resolve("Intermediate/Build"));
+        var generatedSource = Files.writeString(generated.resolve("generated.cpp"), "old generated source");
+        var capture = new CommandFileCapture(root);
+        capture.started("scope", "generator Source", null);
+        assertEquals(List.of(header), capture.snapshot("scope").stream().map(CommandFileCapture.Before::path).toList());
+        Files.writeString(header, "after"); Files.writeString(log, "background log"); Files.delete(library);
+        Files.writeString(generatedSource, "regenerated"); Files.writeString(source.resolve("another.log"), "new log");
+        assertEquals(List.of(header), capture.completed("scope").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    @Test void knownReadOnlyCommandsDoNotClaimConcurrentChangesEvenInReferencedSourceFiles() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("file.cpp"), "before");
+        var capture = new CommandFileCapture(root);
+        for (var command : List.of("rg -n pattern Source", "Get-Content Source/file.cpp | Select-String pattern",
+            "powershell.exe -NoProfile -Command \"Get-ChildItem Source; Get-Content Source/file.cpp\"",
+            "cmd /c type Source/file.cpp", "git diff -- Source/file.cpp")) {
+            capture.started("read", command, null);
+            assertTrue(capture.snapshot("read").isEmpty(), command);
+            Files.writeString(file, Files.readString(file) + "user edit");
+            assertTrue(capture.completed("read").isEmpty(), command);
+        }
+    }
+
+    @Test void mixedReadsAndWritesOnlyReserveTheWritingSegmentsAndExplicitArtifactsStillWork() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var read = Files.writeString(source.resolve("read.cpp"), "read before");
+        var log = Files.writeString(source.resolve("explicit.log"), "log before");
+        var library = Files.write(source.resolve("explicit.lib"), new byte[]{1, 0, 2});
+        var capture = new CommandFileCapture(root, (path, directory) -> true);
+        capture.started("mixed", "Get-Content Source/read.cpp; Set-Content Source/explicit.log after; Remove-Item Source/explicit.lib", null);
+        assertEquals(Set.of(log, library), capture.snapshot("mixed").stream().map(CommandFileCapture.Before::path)
+            .collect(java.util.stream.Collectors.toSet()));
+        Files.writeString(read, "concurrent user edit"); Files.writeString(log, "after"); Files.delete(library);
+        assertEquals(Set.of(log, library), capture.completed("mixed").stream().map(CommandFileCapture.Before::path)
+            .collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test void writingAScriptDoesNotWatchItsParentButExecutingItStillFindsComputedSourceEdits() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var script = Files.writeString(source.resolve("worker.py"), "before");
+        var other = Files.writeString(source.resolve("other.cpp"), "other before");
+        var capture = new CommandFileCapture(root);
+        capture.started("write", "Set-Content Source/worker.py after", null);
+        Files.writeString(script, "after"); Files.writeString(other, "concurrent edit");
+        assertEquals(List.of(script), capture.completed("write").stream().map(CommandFileCapture.Before::path).toList());
+        capture.started("execute", "python Source/worker.py", null);
+        Files.writeString(other, "computed edit"); Files.writeString(source.resolve("worker.log"), "runtime log");
+        assertEquals(List.of(other), capture.completed("execute").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    @Test void explicitWritesInGeneratedDirectoriesAndShellRedirectionBypassInferredIgnores() throws Exception {
+        var source = Files.createDirectories(root.resolve("Saved/Logs"));
+        var capture = new CommandFileCapture(root);
+        for (var command : List.of("echo entry > Saved/Logs/output.log",
+            "Get-Content input.txt | Out-File Saved/Logs/output.log",
+            "[IO.File]::WriteAllText('Saved/Logs/output.log', 'entry')",
+            "node -e \"require('fs').writeFileSync('Saved/Logs/output.log', 'entry')\"",
+            "python -c \"open('Saved/Logs/output.log', 'w').write('entry')\"")) {
+            Files.deleteIfExists(source.resolve("output.log"));
+            capture.started("write", command, null);
+            Files.writeString(source.resolve("output.log"), "entry");
+            assertEquals(List.of(source.resolve("output.log")), capture.completed("write").stream()
+                .map(CommandFileCapture.Before::path).toList(), command);
+        }
+    }
+
+    @Test void projectIgnoreRulesFilterBothExistingAndNewInferredFiles() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var header = Files.writeString(source.resolve("file.cpp"), "before");
+        var excluded = Files.writeString(source.resolve("project-noise.txt"), "noise");
+        var capture = new CommandFileCapture(root, (path, directory) -> path.getFileName().toString().startsWith("project-"));
+        capture.started("scope", "generator Source", null);
+        assertEquals(List.of(header), capture.snapshot("scope").stream().map(CommandFileCapture.Before::path).toList());
+        Files.writeString(header, "after"); Files.writeString(excluded, "background");
+        Files.writeString(source.resolve("project-new.txt"), "new noise");
+        assertEquals(List.of(header), capture.completed("scope").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    @Test void commandsWithSubstitutionsAndUnknownHelpersKeepBoundedFallbackCapture() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("file.cpp"), "before");
+        Files.writeString(source.resolve("helper.py"), "# writes computed paths");
+        var capture = new CommandFileCapture(root);
+        capture.started("read-with-side-effect", "Get-Content $(python Source/helper.py)", null);
+        Files.writeString(file, "after");
+        assertEquals(List.of(file), capture.completed("read-with-side-effect").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
+    @Test void aWritingPipelineRetainsInputDirectoryScopeAndExplicitVcsRestoresKeepIgnoredFiles() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("file.cpp"), "before");
+        var log = Files.writeString(source.resolve("output.log"), "log before");
+        var capture = new CommandFileCapture(root);
+        capture.started("pipeline", "Get-ChildItem Source | ForEach-Object { Set-Content $_.FullName after }", null);
+        Files.writeString(file, "pipeline after"); Files.writeString(log, "background log");
+        assertEquals(List.of(file), capture.completed("pipeline").stream().map(CommandFileCapture.Before::path).toList());
+        capture.started("restore", "p4 revert Source/output.log", null);
+        Files.writeString(log, "restored log");
+        var restored = capture.completed("restore");
+        assertEquals(List.of(log), restored.stream().map(CommandFileCapture.Before::path).toList());
+        assertFalse(restored.getFirst().preserveFormat());
+    }
+
+    @Test void overlyComplexShellSyntaxKeepsFallbackInsteadOfBeingAssumedReadOnly() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("file.cpp"), "before");
+        var capture = new CommandFileCapture(root);
+        capture.started("complex", "rg Source " + " | Select-String pattern".repeat(130) + " | generator", null);
+        Files.writeString(file, "after");
+        assertEquals(List.of(file), capture.completed("complex").stream().map(CommandFileCapture.Before::path).toList());
+    }
+
     @Test void gitRevertResolvesCommitFilesWithoutScanningTheWorktreeOrCapturingGitInternals() throws Exception {
         git("init", "--quiet"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.invalid");
         git("config", "core.autocrlf", "false");

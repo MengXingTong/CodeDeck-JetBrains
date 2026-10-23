@@ -339,7 +339,7 @@ final class CodexToolWindowController implements Disposable {
                 case SEND, STEER, QUEUED_INPUT, STOP, RENAME, COMPACT, REVIEW, REWIND -> true;
                 default -> false;
             }) {
-                toast(UiMessages.message("该会话正被其他客户端占用，当前仅查看历史；请在原客户端释放会话后重新打开"));
+                toast(UiMessages.message("当前查看历史快照，请先继续原会话或复制为新会话"));
                 return;
             }
             switch (command.type()) {
@@ -369,6 +369,8 @@ final class CodexToolWindowController implements Disposable {
                 case ACTIVATE_SESSION -> conversations.publishCurrentSession();
                 case HISTORY -> conversations.loadHistory(string(request, "search", ""));
                 case OPEN_THREAD -> conversations.openThread(string(request, "id", ""));
+                case RESUME_THREAD -> conversations.resumeHistoryThread(string(request, "id", ""));
+                case FORK_THREAD -> conversations.forkHistoryThread(string(request, "id", ""));
                 case RENAME -> conversations.renameCurrentThread();
                 case EXPORT -> conversations.exportConversation();
                 case PICK_FILE -> workspaceInput.chooseAttachment(false);
@@ -411,7 +413,10 @@ final class CodexToolWindowController implements Disposable {
                 case SAVE_PROVIDER_PROFILE -> providerSettings.saveProviderProfile(request);
                 case DELETE_PROVIDER_PROFILE -> providerSettings.deleteProviderProfile(string(request, "id", ""));
                 case CHECK_PROVIDERS -> providerSettings.publishProviderStatus();
-                case BEHAVIOR_SETTING -> providerSettings.updateBehaviorSetting(request);
+                case BEHAVIOR_SETTING -> {
+                    providerSettings.updateBehaviorSetting(request);
+                    if ("sendOpenedFilePath".equals(string(request, "key", ""))) publishFileContext();
+                }
                 case BROWSE_NOTIFICATION_SOUND -> providerSettings.browseNotificationSound();
                 case TEST_NOTIFICATION_SOUND -> providerSettings.playConfiguredSound(true);
                 case TOGGLE_STREAMING -> providerSettings.toggleStreaming();
@@ -483,8 +488,7 @@ final class CodexToolWindowController implements Disposable {
         presenter.addBehaviorSettings(
             state,
             settings,
-            session,
-            settings.sendOpenedFilePath ? currentEditorContext() : null
+            session
         );
         state.addProperty("globalInstructions", settings.globalInstructions);
         state.addProperty("projectInstructions", instructions);
@@ -495,6 +499,7 @@ final class CodexToolWindowController implements Disposable {
         state.add("attachments", presenter.attachmentsJson(session));
         state.add("fileReferences", presenter.fileReferencesJson(session));
         presenter.bootstrap(session, state);
+        publishFileContext();
         session.transcript().forEach(entry -> presenter.message(session, entry));
         publishChanges(session.id().value(), changeService.listSummaries(session.id().value()));
         codexFeatures.loadSkills(false);
@@ -697,8 +702,7 @@ final class CodexToolWindowController implements Disposable {
         presenter.addBehaviorSettings(
             state,
             settings,
-            session,
-            settings.sendOpenedFilePath ? currentEditorContext() : null
+            session
         );
         state.addProperty("globalInstructions", settings.globalInstructions);
         state.addProperty("projectInstructions", instructions);

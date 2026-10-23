@@ -555,7 +555,7 @@
   "无法读取忽略模板：": "Cannot read ignore template: ",
   "ChangeList 忽略列表": "ChangeList ignore list",
   "保存并刷新": "Save and refresh",
-  "<html>忽略列表只控制本侧栏的展示，适用于所有变更文件。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>": "<html>The ignore list controls only this sidebar and applies to all changed files.<br>Paths are relative to the current project; end directories with /. Add exceptions for templates or parent directories to resume tracking.</html>",
+  "<html>忽略列表控制本侧栏展示，并过滤聊天中的命令推测捕获；AI 明确修改的文件仍会捕获。<br>路径相对于当前项目；目录末尾加 /。恢复跟踪可为模板或父目录添加例外。</html>": "<html>The ignore list controls this sidebar and filters inferred command changes in chat; explicit AI edits are still captured.<br>Paths are relative to the current project; end directories with /. Add exceptions for templates or parent directories to resume tracking.</html>",
   "GitHub 默认模板": "GitHub default templates",
   "Gitignore 语法：每行一条，支持 # 注释、*、**、/ 和 ! 例外；自定义规则排在模板之后。": "Gitignore syntax: one rule per line, supporting # comments, *, **, /, and ! exceptions. Custom rules follow templates.",
   "自定义规则": "Custom rules",
@@ -1020,5 +1020,12 @@
   "消息不能为空，请使用删除按钮移除": "The message cannot be empty; use Delete to remove it",
   "当前回合尚未准备好接收引导，消息仍在队列中": "This turn is not ready for steering; the message remains queued",
   "引导失败，消息已恢复到队列": "Steering failed; the message was restored to the queue",
-  "无效的排队消息操作": "Invalid queued message action"
+  "无效的排队消息操作": "Invalid queued message action",
+  "当前查看已保存的历史快照。": "You are viewing a saved history snapshot.",
+  "刷新历史": "Refresh history",
+  "继续原会话": "Continue original chat",
+  "复制为新会话继续": "Copy to a new chat",
+  "当前查看历史快照，请先继续原会话或复制为新会话": "You are viewing a history snapshot. Continue the original chat or copy it to a new chat first.",
+  "原会话仍被其他客户端占用，可刷新历史或复制为新会话继续": "Another client still holds the original chat. Refresh its history or copy it to a new chat to continue.",
+  "已复制为新会话，可以继续发送消息": "Copied to a new chat. You can now send messages."
 }

@@ -215,10 +215,82 @@ class CodexAppServerServiceTest {
     }
 
     @Test
+    void browsingAndRefreshingHistoryOnlyReadPersistedPages() {
+        var methods = new ArrayList<String>();
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.function.BiFunction<String, JsonObject, CompletableFuture<JsonObject>> request = (method, params) -> {
+            methods.add(method);
+            assertEquals("external", params.get("threadId").getAsString());
+            if (method.equals("thread/read")) {
+                assertFalse(params.get("includeTurns").getAsBoolean());
+                reads.incrementAndGet();
+                return CompletableFuture.completedFuture(JsonParser.parseString("{\"thread\":{\"id\":\"external\"}}").getAsJsonObject());
+            }
+            assertEquals("thread/turns/list", method);
+            var response = new JsonObject();
+            var turns = new com.google.gson.JsonArray();
+            var turn = new JsonObject();
+            turn.addProperty("id", params.has("cursor") ? "latest-" + reads.get() : "first");
+            turns.add(turn); response.add("data", turns);
+            if (!params.has("cursor")) response.addProperty("nextCursor", "next");
+            return CompletableFuture.completedFuture(response);
+        };
+        for (var version = 1; version <= 2; version++) {
+            var result = CodexAppServerService.openHistoryThread("external", request).join();
+            assertTrue(result.get("historyReadOnly").getAsBoolean());
+            var turns = result.getAsJsonObject("thread").getAsJsonArray("turns");
+            assertEquals(2, turns.size());
+            assertEquals("latest-" + version, turns.get(1).getAsJsonObject().get("id").getAsString());
+        }
+        assertEquals(java.util.List.of("thread/read", "thread/turns/list", "thread/turns/list",
+            "thread/read", "thread/turns/list", "thread/turns/list"), methods);
+    }
+
+    @Test
+    void forkCopiesAnOccupiedHistoryWithoutResumingTheSource() {
+        var methods = new ArrayList<String>();
+        var result = CodexAppServerService.forkHistoryThread("occupied", (method, params) -> {
+            methods.add(method);
+            if (method.equals("thread/fork")) {
+                assertEquals("occupied", params.get("threadId").getAsString());
+                assertTrue(params.get("excludeTurns").getAsBoolean());
+                return CompletableFuture.completedFuture(JsonParser.parseString("""
+                    {"thread":{"id":"independent","forkedFromId":"occupied"}}
+                    """).getAsJsonObject());
+            }
+            assertEquals("thread/turns/list", method);
+            assertEquals("independent", params.get("threadId").getAsString());
+            return CompletableFuture.completedFuture(JsonParser.parseString(params.has("cursor") ? """
+                {"data":[{"id":"copied-reply","items":[{"type":"agentMessage","text":"原回复"}]}]}
+                """ : """
+                {"data":[{"id":"copied-input","items":[]}],"nextCursor":"next"}
+                """).getAsJsonObject());
+        }).join();
+        assertFalse(result.get("historyReadOnly").getAsBoolean());
+        assertEquals("independent", result.getAsJsonObject("thread").get("id").getAsString());
+        assertEquals(2, result.getAsJsonObject("thread").getAsJsonArray("turns").size());
+        assertEquals(java.util.List.of("thread/fork", "thread/turns/list", "thread/turns/list"), methods);
+    }
+
+    @Test
+    void failedForkAndInvalidForkIdentityCannotEnableWritingToTheSource() {
+        var cause = new java.io.IOException("fork unavailable");
+        var failed = CodexAppServerService.forkHistoryThread("source", (method, params) -> CompletableFuture.failedFuture(cause));
+        assertEquals(cause, assertThrows(CompletionException.class, failed::join).getCause());
+        for (var response : java.util.List.of("{}", "{\"thread\":{}}", "{\"thread\":{\"id\":\"source\"}}")) {
+            var invalid = CodexAppServerService.forkHistoryThread("source", (method, params) -> {
+                assertEquals("thread/fork", method);
+                return CompletableFuture.completedFuture(JsonParser.parseString(response).getAsJsonObject());
+            });
+            assertTrue(assertThrows(CompletionException.class, invalid::join).getCause() instanceof java.io.IOException);
+        }
+    }
+
+    @Test
     void occupiedHistoryLoadsReadOnlyMetadataAndAllTurnsWithoutResumingAgain() {
         var methods = new ArrayList<String>();
         var requests = new ArrayList<JsonObject>();
-        var result = CodexAppServerService.openHistoryThread("occupied", (method, params) -> {
+        var result = CodexAppServerService.resumeHistoryThread("occupied", (method, params) -> {
             methods.add(method);
             requests.add(params);
             return switch (method) {
@@ -252,7 +324,7 @@ class CodexAppServerServiceTest {
     @Test
     void reopeningReleasedHistoryRestoresWritingWithoutReadFallback() {
         var methods = new ArrayList<String>();
-        var result = CodexAppServerService.openHistoryThread("released", (method, params) -> {
+        var result = CodexAppServerService.resumeHistoryThread("released", (method, params) -> {
             methods.add(method);
             assertEquals("released", params.get("threadId").getAsString());
             if (method.equals("thread/resume")) {
@@ -277,7 +349,7 @@ class CodexAppServerServiceTest {
         for (var message : java.util.List.of("connection closed", "thread other already has an active writer")) {
             var methods = new ArrayList<String>();
             var cause = new java.io.IOException(message);
-            var failure = CodexAppServerService.openHistoryThread("requested", (method, params) -> {
+            var failure = CodexAppServerService.resumeHistoryThread("requested", (method, params) -> {
                 methods.add(method);
                 return CompletableFuture.failedFuture(cause);
             });
@@ -291,7 +363,7 @@ class CodexAppServerServiceTest {
     void occupiedHistoryPropagatesReadAndPaginationFailures() {
         for (var failedMethod : java.util.List.of("thread/read", "thread/turns/list")) {
             var cause = new java.io.IOException("history unavailable");
-            var failure = CodexAppServerService.openHistoryThread("occupied", (method, params) -> {
+            var failure = CodexAppServerService.resumeHistoryThread("occupied", (method, params) -> {
                 if (method.equals("thread/resume")) return CompletableFuture.failedFuture(
                     new java.io.IOException("thread occupied already has an active writer"));
                 if (method.equals(failedMethod)) return CompletableFuture.failedFuture(cause);

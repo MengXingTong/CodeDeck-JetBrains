@@ -211,14 +211,14 @@ test('在当前运行页签点击自身历史正常返回，打开其他历史�
   await expect(page.getByTitle('停止', {exact: true})).toBeVisible();
 });
 
-test('外部占用历史显示只读快照，禁止发送且重新打开后恢复输入', async ({page}) => {
+test('历史快照支持刷新和显式继续，保留草稿并在恢复成功后允许发送', async ({page}) => {
   await page.goto('/tools/ui-preview.html');
   const editor = page.getByRole('textbox', {name: '消息'});
   await expect(editor).toBeVisible();
   await page.evaluate(() => CodexGui.receive(previewEnvelope('thread', {
     id: 'external-writer', title: '外部运行会话', provider: 'codex', historyReadOnly: true,
   })));
-  await expect(page.locator('.history-read-only')).toContainText('其他客户端占用');
+  await expect(page.locator('.history-read-only')).toContainText('已保存的历史快照');
   await expect(page.getByTitle('发送', {exact: true})).toBeDisabled();
   await expect(page.getByTitle('回溯', {exact: true})).toBeDisabled();
   await captureRequests(page);
@@ -227,9 +227,24 @@ test('外部占用历史显示只读快照，禁止发送且重新打开后恢�
   await expect(editor).toHaveText('等待释放的草稿');
   expect(await requestsOfType(page, 'send')).toEqual([]);
   expect(await requestsOfType(page, 'openThread')).toEqual([]);
-  await page.getByRole('button', {name: '重新打开', exact: true}).click();
+  await page.getByRole('button', {name: '刷新历史', exact: true}).click();
   await expect.poll(() => requestsOfType(page, 'openThread'))
     .toMatchObject([{type: 'openThread', payload: {id: 'external-writer'}}]);
+  expect(await requestsOfType(page, 'resumeThread')).toEqual([]);
+  await page.evaluate(() => {
+    CodexGui.receive(previewEnvelope('clear', {threadId: 'external-writer'}));
+    CodexGui.receive(previewEnvelope('thread', {id: 'external-writer', historyReadOnly: true}));
+  });
+  await expect(editor).toHaveText('等待释放的草稿');
+  await expect(page.getByTitle('发送', {exact: true})).toBeDisabled();
+  await page.getByRole('button', {name: '继续原会话', exact: true}).click();
+  await expect.poll(() => requestsOfType(page, 'resumeThread'))
+    .toMatchObject([{type: 'resumeThread', payload: {id: 'external-writer'}}]);
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('toast', {
+    message: '原会话仍被其他客户端占用，可刷新历史或复制为新会话继续',
+  })));
+  await expect(page.locator('.history-read-only')).toBeVisible();
+  await expect(editor).toHaveText('等待释放的草稿');
   await page.evaluate(() => CodexGui.receive(previewEnvelope('thread', {
     id: 'external-writer', title: '外部运行会话', provider: 'codex', historyReadOnly: false,
   })));
@@ -237,6 +252,67 @@ test('外部占用历史显示只读快照，禁止发送且重新打开后恢�
   await expect(page.getByTitle('发送', {exact: true})).toBeEnabled();
   await expect(editor).toHaveText('等待释放的草稿');
 });
+
+test('复制历史走独立分叉请求，失败保留快照，成功绑定新会话并保留草稿', async ({page}) => {
+  await page.goto('/tools/ui-preview.html');
+  const editor = page.getByRole('textbox', {name: '消息'});
+  await expect(editor).toBeVisible();
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('thread', {
+    id: 'occupied-source', title: '原会话', provider: 'codex', historyReadOnly: true,
+  })));
+  await editor.fill('接着完成这个任务');
+  await captureRequests(page);
+  await page.getByRole('button', {name: '复制为新会话继续', exact: true}).click();
+  await expect.poll(() => requestsOfType(page, 'forkThread'))
+    .toMatchObject([{type: 'forkThread', payload: {id: 'occupied-source'}}]);
+  expect(await requestsOfType(page, 'resumeThread')).toEqual([]);
+  expect(await requestsOfType(page, 'send')).toEqual([]);
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('toast', {message: '无法打开历史会话'})));
+  await expect(page.locator('.history-read-only')).toBeVisible();
+  await expect(editor).toHaveText('接着完成这个任务');
+  await page.getByRole('button', {name: '复制为新会话继续', exact: true}).click();
+  await page.evaluate(() => {
+    CodexGui.receive(previewEnvelope('clear', {threadId: 'independent-copy'}));
+    CodexGui.receive(previewEnvelope('message', {entry: {
+      kind: 'assistant', title: 'Codex', body: '从原会话复制的回复', itemId: 'copied-reply',
+    }}));
+    CodexGui.receive(previewEnvelope('thread', {
+      id: 'independent-copy', title: '原会话', provider: 'codex', historyReadOnly: false,
+    }));
+  });
+  await expect(page.locator('.history-read-only')).toHaveCount(0);
+  await expect(page.locator('#messages')).toContainText('从原会话复制的回复');
+  await expect(editor).toHaveText('接着完成这个任务');
+  await expect(page.getByTitle('发送', {exact: true})).toBeEnabled();
+  await editor.press('Enter');
+  await expect.poll(() => requestsOfType(page, 'send'))
+    .toMatchObject([{type: 'send', payload: {text: '接着完成这个任务'}}]);
+});
+
+for (const locale of ['zh-CN', 'en']) {
+  test('历史快照操作在窄面板中完整显示：' + locale, async ({page}, testInfo) => {
+    await page.setViewportSize({width: 360, height: 800});
+    await page.goto('/tools/ui-preview.html?lang=' + locale);
+    await expect(page.locator('.ProseMirror')).toBeVisible();
+    await page.evaluate(() => CodexGui.receive(previewEnvelope('thread', {
+      id: 'snapshot', title: '历史快照', provider: 'codex', historyReadOnly: true,
+    })));
+    const notice = page.locator('.history-read-only');
+    await expect(notice).toContainText(locale === 'en' ? 'saved history snapshot' : '已保存的历史快照');
+    const buttons = notice.getByRole('button');
+    await expect(buttons).toHaveCount(3);
+    const bounds = await notice.boundingBox();
+    expect(bounds).not.toBeNull();
+    for (const button of await buttons.all()) {
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(bounds!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(bounds!.y + bounds!.height);
+    }
+    await page.screenshot({path: testInfo.outputPath('history-snapshot.png')});
+  });
+}
 
 test('后端显式定位会话只切换目标页签，后台 thread 更新不抢焦点', async ({page}) => {
   await page.goto('/tools/ui-preview.html');

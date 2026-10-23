@@ -9,6 +9,18 @@ import {
 } from '../../main/ts/store';
 
 describe('bridge store', () => {
+  it('keeps workspace file context out of session and settings bootstrap snapshots', () => {
+    const state: BridgeState = {messages: [], activeFile: 'Current.cpp', activeFileStartLine: 2,
+      activeFileEndLine: 4, activeFileSelectionLabel: 'after:L2-L4'};
+    for (const activeFile of ['', 'Previous.cpp']) {
+      reduceBridgeEvent(state, {type: 'bootstrap', state: {model: 'new-model', sendOpenedFilePath: true,
+        activeFile, activeFileStartLine: 0, activeFileEndLine: 0, activeFileSelectionLabel: ''}});
+      expect(state).toMatchObject({model: 'new-model', sendOpenedFilePath: true,
+        activeFile: 'Current.cpp', activeFileStartLine: 2, activeFileEndLine: 4,
+        activeFileSelectionLabel: 'after:L2-L4'});
+    }
+  });
+
   it('keeps queue contents and readiness across count updates and clears them on a new conversation', () => {
     const state: BridgeState = {messages: []};
     const queuedInputs = [{id: 'first', text: '待处理'}];

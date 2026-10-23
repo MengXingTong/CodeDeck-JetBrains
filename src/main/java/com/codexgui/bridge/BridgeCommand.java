@@ -39,6 +39,8 @@ public sealed interface BridgeCommand permits BridgeCommand.V1 {
         ACTIVATE_SESSION("activateSession"),
         HISTORY("history"),
         OPEN_THREAD("openThread"),
+        RESUME_THREAD("resumeThread"),
+        FORK_THREAD("forkThread"),
         RENAME("rename"),
         EXPORT("export"),
         PICK_FILE("pickFile"),

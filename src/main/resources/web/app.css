@@ -42,8 +42,9 @@
   --code-font: "JetBrains Mono", Consolas, monospace;
 }
 
-.history-read-only {display:flex;align-items:center;gap:12px;margin:8px 16px 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--raised);color:var(--text);font-size:12px;line-height:1.6;}
-.history-read-only span {flex:1;min-width:0;}
+.history-read-only {display:flex;flex-direction:column;align-items:stretch;gap:6px;margin:8px 16px 0;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--raised);color:var(--text);font-size:12px;line-height:1.6;}
+.history-read-only span {min-width:0;}
+.history-actions {display:flex;flex-wrap:wrap;gap:6px 12px;}
 .history-read-only button {flex-shrink:0;}
 
 [data-theme="light"] {

@@ -36,6 +36,14 @@ public final class IgnoreRules {
 
     public boolean isIgnored(Path path) { return isIgnored(path, false); }
 
+    /** Directory traversal must still reach explicit restored descendants. */
+    public boolean canSkipDirectory(Path path) {
+        if (!scope.contains(path)) return false;
+        String prefix = scope.root().relativize(path.normalize()).toString().replace('\\', '/') + "/";
+        return restored.stream().noneMatch(entry -> entry.regionMatches(true, 0, prefix, 0, prefix.length()))
+                && isIgnored(path, true);
+    }
+
     public boolean isIgnored(Path path, boolean directory) {
         if (!scope.contains(path)) return false;
         String relative = scope.root().relativize(path.normalize()).toString().replace('\\', '/');

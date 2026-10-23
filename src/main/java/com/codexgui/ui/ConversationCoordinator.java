@@ -235,15 +235,31 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     }
 
     void openThread(String threadId) {
+        openThread(threadId, HistoryAction.READ);
+    }
+
+    void resumeHistoryThread(String threadId) {
+        openThread(threadId, HistoryAction.RESUME);
+    }
+
+    void forkHistoryThread(String threadId) {
+        openThread(threadId, HistoryAction.FORK);
+    }
+
+    private enum HistoryAction { READ, RESUME, FORK }
+
+    private void openThread(String threadId, HistoryAction action) {
         var session = activeSession();
         if (threadId.isBlank()) return;
         var provider = session.provider();
+        if (action != HistoryAction.READ && (!Objects.equals(provider, "codex")
+            || !session.historyReadOnly() || !Objects.equals(session.threadId(), threadId))) return;
         // 优先定位已有页签，运行中的回合和草稿都留在原会话中。
         var existing = sessionRegistry.sessions().stream()
             .filter(candidate -> Objects.equals(candidate.provider(), provider)
                 && Objects.equals(candidate.threadId(), threadId) && !candidate.historyReadOnly())
             .findFirst().orElse(null);
-        if (existing != null) {
+        if (existing != null && action != HistoryAction.FORK) {
             sessionRegistry.activate(existing.id());
             presenter.thread(existing, true);
             return;
@@ -302,10 +318,27 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             });
             return;
         }
-        // 外部客户端持有写入权时读取历史快照，避免重复恢复占用中的会话。
-        codex.openHistoryThread(threadId).thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
+        var operation = switch (action) {
+            case READ -> codex.openHistoryThread(threadId);
+            case RESUME -> codex.resumeHistoryThread(threadId);
+            case FORK -> codex.forkHistoryThread(threadId);
+        };
+        operation.thenAccept(result -> ApplicationManager.getApplication().invokeLater(() -> {
             openingHistory.remove(session.id(), requestToken);
-            if (canApplyHistory(session, provider, generation)) renderThread(session, result);
+            if (!canApplyHistory(session, provider, generation)) return;
+            var preserveInputs = Objects.equals(session.threadId(), threadId);
+            var title = session.title();
+            renderThread(session, result, preserveInputs);
+            if (action == HistoryAction.RESUME && session.historyReadOnly()) {
+                presenter.toast(session, UiMessages.message("原会话仍被其他客户端占用，可刷新历史或复制为新会话继续"));
+            } else if (action == HistoryAction.FORK) {
+                if (string(result.getAsJsonObject("thread"), "name", "").isBlank()) {
+                    session.title(title);
+                    presenter.thread(session);
+                }
+                presenter.toast(session, UiMessages.message("已复制为新会话，可以继续发送消息"));
+                loadHistory("");
+            }
         })).exceptionally(error -> {
             ApplicationManager.getApplication().invokeLater(() -> {
                 openingHistory.remove(session.id(), requestToken);
@@ -321,10 +354,18 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     }
 
     void renderThread(ConversationSession session, JsonObject result) {
+        renderThread(session, result, false);
+    }
+
+    private void renderThread(ConversationSession session, JsonObject result, boolean preserveInputs) {
         var thread = result.getAsJsonObject("thread");
         if (thread == null) return;
+        var attachments = preserveInputs ? List.copyOf(session.attachments()) : List.<Attachment>of();
+        var references = preserveInputs ? List.copyOf(session.fileReferences()) : List.<FileReference>of();
         approvalCoordinator.clearSession(session.id());
         session.clearConversation();
+        session.attachments().addAll(attachments);
+        session.fileReferences().addAll(references);
         session.historyReadOnly(result.has("historyReadOnly") && result.get("historyReadOnly").getAsBoolean());
         session.threadId(string(thread, "id", null));
         session.title(string(thread, "name", ""));

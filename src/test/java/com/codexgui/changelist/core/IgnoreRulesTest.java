@@ -21,6 +21,14 @@ class IgnoreRulesTest {
         assertFalse(rules.isIgnored(root.resolve("Source/game.cpp")));
     }
 
+    @Test void captureTraversalDoesNotSkipAnIgnoredParentContainingARestoredDescendant() {
+        var rules = rules(List.of(), "Custom/\n", List.of(), List.of("Custom/keep.cpp"));
+        assertFalse(rules.canSkipDirectory(root.resolve("Custom")));
+        assertTrue(rules.canSkipDirectory(root.resolve("Custom/Other")));
+        assertFalse(rules.isIgnored(root.resolve("Custom/keep.cpp")));
+        assertTrue(rules.isIgnored(root.resolve("Custom/excluded.cpp")));
+    }
+
     @Test void unrealTemplateHidesGeneratedFilesAndPreservesSourceAndAssets() {
         var rules = rules(List.of("UnrealEngine"), "", List.of(), List.of());
         for (String path : List.of("Intermediate/Build/test.gen.cpp", "Binaries/Win64/game.dll", "Saved/Logs/game.log",

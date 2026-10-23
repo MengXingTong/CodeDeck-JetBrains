@@ -56,6 +56,8 @@ Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检�
 
 `src/test/browser/queued-inputs.spec.ts` 覆盖输入框上方的消息队列、队首文字引导、编辑/取消/删除、主输入与跨页签草稿隔离、后台刷新期间的编辑文本和光标、中文组合输入，以及窄栏与英文布局。
 
+`BridgeEventPresenterTest`、`store.test.ts` 和 `diff-context.spec.ts` 验证编辑器上下文独立于设置回推：新建、切换页签以及前后台迟到的空/旧设置快照不覆盖当前文件、行号和 Diff 版本标签；浏览器回归同时检查跨页签草稿、关闭文件、移除上下文和重新开启。页面初始化与开关上下文使用独立的 `fileContext` 事件，设置 `bootstrap` 不携带编辑器状态。
+
 ## 持续集成与工程结构
 
 ### 界面国际化

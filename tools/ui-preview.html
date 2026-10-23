@@ -115,7 +115,14 @@
         if (previewState.model === message.model) previewState.model = previewState.models[0] || '';
         previewReceive('bootstrap',{state:previewState});
       }
-      if (message.action === 'behaviorSetting') previewState[message.key] = message.value;
+      if (message.action === 'behaviorSetting') {
+        previewState[message.key] = message.value;
+        if (message.key === 'sendOpenedFilePath') previewReceive('fileContext', {
+          path: message.value ? previewState.activeFile || 'Source/File.cpp' : '',
+          startLine: message.value ? previewState.activeFileStartLine : 0,
+          endLine: message.value ? previewState.activeFileEndLine : 0,
+        });
+      }
       if (message.action === 'selectAgent') previewState.activeAgentId = previewState.agents.some(agent => agent.id === message.id) ? message.id : '';
       if (['toggleThinking','toggleStreaming','selectProvider','setting','behaviorSetting'].includes(message.action)) previewReceive('bootstrap',{state:previewState});
       if (message.action === 'selectAgent') previewReceive('bootstrap',{state:previewState});
@@ -195,6 +202,9 @@
       }
       if (message.action !== 'ready') return;
       setTimeout(() => {
+        // Match the IDE bridge: editor context is independent from settings snapshots.
+        previewReceive('fileContext', {path: previewState.activeFile,
+          startLine: previewState.activeFileStartLine, endLine: previewState.activeFileEndLine});
         if (location.search.includes('long')) {
           previewState.messages = Array.from({length:205},(_,index)=>({
             kind:index%2?'assistant':'user',
