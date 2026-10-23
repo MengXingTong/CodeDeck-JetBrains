@@ -68,6 +68,11 @@ public final class BridgeProtocolCodec {
         if ((type == BridgeCommand.Type.SEND || type == BridgeCommand.Type.STEER) && !validSendPayload(payload)) {
             return rejected("invalid_payload", type.wireName() + UiMessages.message(" payload 必须包含 text 和 referenceIds"), envelope);
         }
+        if (type == BridgeCommand.Type.QUEUED_INPUT && (!stringField(payload, "id") || !stringField(payload, "action")
+            || !java.util.Set.of("edit", "cancel", "save", "delete", "steer").contains(payload.get("action").getAsString())
+            || ("save".equals(payload.get("action").getAsString()) && !stringFieldAllowEmpty(payload, "text")))) {
+            return rejected("invalid_payload", UiMessages.message("无效的排队消息操作"), envelope);
+        }
         var generation = envelope.get("generation").getAsLong();
         if (generation < 0) return rejected("missing_identity", UiMessages.message("Bridge generation 不能为负数"), envelope);
         return new Decoded(new BridgeCommand.V1(

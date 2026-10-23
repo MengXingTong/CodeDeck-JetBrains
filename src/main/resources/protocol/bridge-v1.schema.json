@@ -8,7 +8,7 @@
   "properties": {
     "v": {"const": 1},
     "type": {"type": "string", "enum": [
-      "ready", "reconnect", "send", "steer", "stop", "new", "closeSession", "activateSession",
+      "ready", "reconnect", "send", "steer", "queuedInput", "stop", "new", "closeSession", "activateSession",
       "history", "openThread", "rename", "export", "pickFile", "pickImage", "dropFiles",
       "cancelDrop", "composerBounds", "listProjectFiles", "removeAttachment", "removeFileReference",
       "removeFileReferences", "addFileReferences", "reorderFileReferences", "acceptChange",
@@ -40,9 +40,23 @@
         "referenceIds": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     }}}
+  }, {
+    "if": {"properties": {"type": {"const": "queuedInput"}}},
+    "then": {"properties": {"payload": {
+      "required": ["id", "action"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "action": {"enum": ["edit", "cancel", "save", "delete", "steer"]},
+        "text": {"type": "string"}
+      },
+      "allOf": [{
+        "if": {"properties": {"action": {"const": "save"}}},
+        "then": {"required": ["text"]}
+      }]
+    }}}
   }],
   "x-commandTypes": [
-    "ready", "reconnect", "send", "steer", "stop", "new", "closeSession", "activateSession",
+    "ready", "reconnect", "send", "steer", "queuedInput", "stop", "new", "closeSession", "activateSession",
     "history", "openThread", "rename", "export", "pickFile", "pickImage", "dropFiles",
     "cancelDrop", "composerBounds", "listProjectFiles", "removeAttachment", "removeFileReference",
     "removeFileReferences", "addFileReferences", "reorderFileReferences", "acceptChange",

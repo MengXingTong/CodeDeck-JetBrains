@@ -336,7 +336,7 @@ final class CodexToolWindowController implements Disposable {
             // 关闭会话只确认目标事务，不切换活动会话，避免批量关闭后活动指针落在已关闭页签。
             if (command.type() != BridgeCommand.Type.CLOSE_SESSION) conversations.activateSession(command.sessionId().value());
             if (activeSession().historyReadOnly() && switch (command.type()) {
-                case SEND, STEER, STOP, RENAME, COMPACT, REVIEW, REWIND -> true;
+                case SEND, STEER, QUEUED_INPUT, STOP, RENAME, COMPACT, REVIEW, REWIND -> true;
                 default -> false;
             }) {
                 toast(UiMessages.message("该会话正被其他客户端占用，当前仅查看历史；请在原客户端释放会话后重新打开"));
@@ -355,6 +355,9 @@ final class CodexToolWindowController implements Disposable {
                 case STEER -> conversations.steerInput(
                     string(request, "text", ""),
                     request.has("referenceIds") ? array(request, "referenceIds") : null
+                );
+                case QUEUED_INPUT -> conversations.queuedInputAction(
+                    string(request, "id", ""), string(request, "action", ""), string(request, "text", "")
                 );
                 case STOP -> conversations.interruptCurrentTurn();
                 case NEW -> newConversation(

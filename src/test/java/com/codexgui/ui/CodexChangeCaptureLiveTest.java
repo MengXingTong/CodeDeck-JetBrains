@@ -107,7 +107,7 @@ final class CodexChangeCaptureLiveTest {
              }, ignored -> {})) {
             process.set(rpc);
             var init = new JsonObject(); var client = new JsonObject();
-            client.addProperty("name", "codedeck-capture-acceptance"); client.addProperty("version", "2.1.1"); init.add("clientInfo", client);
+            client.addProperty("name", "codedeck-capture-acceptance"); client.addProperty("version", "2.1.3"); init.add("clientInfo", client);
             var capabilities = new JsonObject(); capabilities.addProperty("experimentalApi", true); init.add("capabilities", capabilities);
             rpc.request("initialize", init).get(25, TimeUnit.SECONDS); rpc.notify("initialized", null);
             var start = new JsonObject(); start.addProperty("cwd", root.toString()); start.addProperty("ephemeral", true);

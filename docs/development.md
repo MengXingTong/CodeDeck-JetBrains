@@ -52,7 +52,9 @@ Gradle 会下载项目锁定的 Node.js，并自动执行 TypeScript 类型检�
 
 `WorkspaceDropIntegrationTest` 检查 ChangeList 实际导出的文件和目录经过原生 IDE 拖放管理器后进入聊天输入框：设置 `CODEDECK_REAL_IDE_DND=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.WorkspaceDropIntegrationTest`。覆盖中文与空格路径、目录引用、已删除文件、图片附件、落点、重复拖入及离开时清理，同时验证原生代码编辑器拒绝打开文件或插入路径文字，不请求模型；普通测试默认跳过。
 
-`ConversationConnectionIntegrationTest` 在真实 IDE 事件队列中重放首条消息先启动、“已连接”通知后到达的顺序：设置 `CODEDECK_REAL_CONNECTION_STATE=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ConversationConnectionIntegrationTest`。检查首条回复与会话绑定、重复连接通知、真正断开时的清理及 Claude 隔离，不启动 CLI 或请求模型；普通测试默认跳过。
+`ConversationConnectionIntegrationTest` 在真实 IDE 事件队列中重放首条消息先启动、“已连接”通知后到达的顺序：设置 `CODEDECK_REAL_CONNECTION_STATE=1`，执行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.ui.ConversationConnectionIntegrationTest`。检查首条回复与会话绑定、重复连接通知、真正断开时的清理及 Claude 隔离；同时验证运行中消息只排队、后台按顺序出队时才显示、文件引用与附件快照、编辑暂停与保存、稳定身份的删除及迟到操作保护、供应商消息回推去重。通过内存 JSON-RPC 传输检查队首引导请求、重复点击和失败恢复，不启动 CLI 或请求模型；普通测试默认跳过。
+
+`src/test/browser/queued-inputs.spec.ts` 覆盖输入框上方的消息队列、队首文字引导、编辑/取消/删除、主输入与跨页签草稿隔离、后台刷新期间的编辑文本和光标、中文组合输入，以及窄栏与英文布局。
 
 ## 持续集成与工程结构
 

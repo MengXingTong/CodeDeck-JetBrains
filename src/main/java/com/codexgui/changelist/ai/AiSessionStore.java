@@ -109,12 +109,13 @@ public final class AiSessionStore implements Disposable {
     }
 
     boolean startRequest(Project project, ContentDiffRequest request, AiDiffSnapshot snapshot, AiOptions options) {
-        var task = new AiTaskState(UiMessages.message("正在生成 AI 注释 · ") + snapshot.file());
+        String fileName = Path.of(snapshot.file()).getFileName().toString();
+        var task = new AiTaskState(UiMessages.message("正在生成 AI 注释 · ") + fileName);
         if (!tryBegin(Path.of(project.getBasePath()).resolve(snapshot.file()), task, options)) return false;
         String key = options.cacheKey(snapshot);
         var session = session(key); session.task = task;
         changed(project, key);
-        new Task.Backgroundable(project, UiMessages.message("AI Diff 注释 · ") + snapshot.file(), true) {
+        new Task.Backgroundable(project, UiMessages.message("AI Diff 注释 · ") + fileName, true) {
             private AiResponse response;
             private CodexCli.Result result;
             @Override public void run(@NotNull ProgressIndicator indicator) {

@@ -9,6 +9,25 @@ import {
 } from '../../main/ts/store';
 
 describe('bridge store', () => {
+  it('keeps queue contents and readiness across count updates and clears them on a new conversation', () => {
+    const state: BridgeState = {messages: []};
+    const queuedInputs = [{id: 'first', text: '待处理'}];
+    reduceBridgeEvent(state, {type: 'busy', busy: true, queuedCount: 1, queuedInputs, canSteer: true});
+    reduceBridgeEvent(state, {type: 'queue', queuedCount: 1, editingQueuedInputId: 'first'});
+    expect(state.queuedInputs).toEqual(queuedInputs);
+    expect(state.canSteer).toBe(true);
+    expect(state.editingQueuedInputId).toBe('first');
+    reduceBridgeEvent(state, {type: 'busy', busy: false, queuedCount: 1});
+    expect(state.canSteer).toBe(false);
+    state.queueEdit = {id: 'first', text: '尚未保存的编辑'};
+    reduceBridgeEvent(state, {type: 'clear', preserveQueue: true});
+    expect(state.queuedInputs).toEqual(queuedInputs);
+    expect(state.queueEdit).toEqual({id: 'first', text: '尚未保存的编辑'});
+    reduceBridgeEvent(state, {type: 'clear'});
+    expect(state.queuedInputs).toEqual([]);
+    expect(state.queuedCount).toBe(0);
+    expect(state.editingQueuedInputId).toBeNull();
+  });
   it('updates an automatic thread title without leaving settings or changing conversation state', () => {
     const state: BridgeState = {messages: [], title: '新会话', threadId: 'thread-a',
       historyReadOnly: true, busy: true, queuedCount: 2, view: 'settings'};

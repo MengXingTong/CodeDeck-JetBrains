@@ -15,6 +15,9 @@ export interface BridgeState {
   connected?: boolean;
   busy?: boolean;
   queuedCount?: number;
+  queuedInputs?: Array<{id: string; text: string; attachments?: string[]; context?: string}>;
+  canSteer?: boolean;
+  editingQueuedInputId?: string | null;
   title?: unknown;
   threadId?: unknown;
   historyReadOnly?: boolean;
@@ -79,12 +82,23 @@ export function reduceBridgeEvent(state: BridgeState, event: ReducedEvent): Brid
       break;
     case 'busy':
       state.busy = Boolean(event.busy);
-      state.queuedCount = nonNegative(event.queuedCount);
-      break;
+      if (!state.busy) state.canSteer = false;
+      // Fall through: busy updates carry the same queue snapshot as queue updates.
     case 'queue':
       state.queuedCount = nonNegative(event.queuedCount);
+      if (Array.isArray(event.queuedInputs)) state.queuedInputs = event.queuedInputs;
+      else if (!state.queuedCount) state.queuedInputs = [];
+      if (typeof event.canSteer === 'boolean') state.canSteer = event.canSteer;
+      if ('editingQueuedInputId' in event) state.editingQueuedInputId = string(event.editingQueuedInputId) || null;
       break;
     case 'clear':
+      if (!event.preserveQueue) {
+        state.queuedInputs = [];
+        state.queuedCount = 0;
+        state.canSteer = false;
+        state.editingQueuedInputId = null;
+        state.queueEdit = null;
+      }
       state.messages = [];
       state.title = string(event.title) || t('新会话');
       state.threadId = event.threadId || null;

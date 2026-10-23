@@ -57,13 +57,22 @@ final class BridgeEventPresenter {
     }
 
     void bootstrap(ConversationSession session, JsonObject state) {
+        state.add("queuedInputs", queuedInputsJson(session));
+        state.addProperty("queuedCount", session.queuedInputs().size());
+        state.addProperty("canSteer", canSteer(session));
+        state.addProperty("editingQueuedInputId", session.editingQueuedInputId());
         var event = event(BridgeEvent.Type.BOOTSTRAP, session.id());
         event.add("state", state);
         send(event);
     }
 
     void clear(ConversationSession session) {
+        clear(session, false);
+    }
+
+    void clear(ConversationSession session, boolean preserveQueue) {
         var event = event(BridgeEvent.Type.CLEAR, session.id());
+        event.addProperty("preserveQueue", preserveQueue);
         event.addProperty("title", session.title());
         event.addProperty("provider", session.provider());
         if (session.threadId() != null) event.addProperty("threadId", session.threadId());
@@ -182,13 +191,40 @@ final class BridgeEventPresenter {
         var event = event(BridgeEvent.Type.BUSY, session.id());
         event.addProperty("busy", session.busy());
         event.addProperty("queuedCount", session.queuedInputs().size());
+        event.add("queuedInputs", queuedInputsJson(session));
+        event.addProperty("canSteer", canSteer(session));
+        event.addProperty("editingQueuedInputId", session.editingQueuedInputId());
         send(event);
     }
 
     void queue(ConversationSession session) {
         var event = event(BridgeEvent.Type.QUEUE, session.id());
         event.addProperty("queuedCount", session.queuedInputs().size());
+        event.add("queuedInputs", queuedInputsJson(session));
+        event.addProperty("canSteer", canSteer(session));
+        event.addProperty("editingQueuedInputId", session.editingQueuedInputId());
         send(event);
+    }
+
+    private static boolean canSteer(ConversationSession session) {
+        return session.busy() && !session.queuedSteerPending() && "codex".equals(session.provider())
+            && session.threadId() != null && !session.threadId().isBlank()
+            && session.providerTurnId() != null && !session.providerTurnId().isBlank();
+    }
+
+    static JsonArray queuedInputsJson(ConversationSession session) {
+        var items = new JsonArray();
+        for (var input : session.queuedInputs()) {
+            var item = new JsonObject();
+            item.addProperty("id", input.id());
+            item.addProperty("text", input.editableText());
+            if (input.editorContext() != null) item.addProperty("context", input.editorContext().displayLabel());
+            var attachments = new JsonArray();
+            input.attachments().forEach(attachment -> attachments.add(attachment.name()));
+            item.add("attachments", attachments);
+            items.add(item);
+        }
+        return items;
     }
 
     void message(ConversationSession session, ConversationEntry entry) {

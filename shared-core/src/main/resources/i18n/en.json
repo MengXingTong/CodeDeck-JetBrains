@@ -1011,5 +1011,14 @@
   "CLI 请求超时：": "CLI request timeout: ",
   "CLI 连接已断开": "CLI disconnected",
   "CLI 协议错误：": "CLI protocol error: ",
-  "\n[引用文件] ": "\n[Referenced file] "
+  "\n[引用文件] ": "\n[Referenced file] ",
+  "待发送消息": "Queued messages",
+  "编辑排队消息": "Edit queued message",
+  "删除排队消息": "Delete queued message",
+  "编辑待发送消息": "Edit queued message text",
+  "该排队消息已发送或移除": "This queued message was already sent or removed",
+  "消息不能为空，请使用删除按钮移除": "The message cannot be empty; use Delete to remove it",
+  "当前回合尚未准备好接收引导，消息仍在队列中": "This turn is not ready for steering; the message remains queued",
+  "引导失败，消息已恢复到队列": "Steering failed; the message was restored to the queue",
+  "无效的排队消息操作": "Invalid queued message action"
 }

@@ -103,6 +103,18 @@ final class BridgeProtocolCodecTest {
         assertProtocolError("missing_version", "{\"type\":\"send\",\"payload\":{}}");
     }
 
+    @Test void queueActionsRequireAStableIdAndSaveRequiresText() {
+        for (var action : java.util.List.of("edit", "cancel", "save", "delete", "steer")) {
+            var json = "{\"v\":1,\"type\":\"queuedInput\",\"requestId\":\"q\",\"sessionId\":\"s\",\"turnId\":\"\",\"generation\":1,"
+                + "\"payload\":{\"id\":\"stable-id\",\"action\":\"" + action + "\",\"text\":\"edited\"}}";
+            assertInstanceOf(BridgeProtocolCodec.Decoded.class, codec.decodeCommand(json));
+        }
+        for (var payload : java.util.List.of("{}", "{\"id\":\"\",\"action\":\"delete\"}",
+            "{\"id\":\"q\",\"action\":\"unknown\"}", "{\"id\":\"q\",\"action\":\"save\"}")) {
+            assertProtocolError("invalid_payload", "{\"v\":1,\"type\":\"queuedInput\",\"requestId\":\"q\",\"sessionId\":\"s\",\"turnId\":\"\",\"generation\":1,\"payload\":" + payload + "}");
+        }
+    }
+
     private void assertProtocolError(String code, String json) {
         var rejected = assertInstanceOf(BridgeProtocolCodec.Rejected.class, codec.decodeCommand(json));
         assertEquals(BridgeEvent.Type.PROTOCOL_ERROR, rejected.error().type());

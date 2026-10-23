@@ -160,7 +160,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
 
     void publishCurrentSession() {
         var session = activeSession();
-        presenter.clear(session);
+        presenter.clear(session, true);
         session.transcript().forEach(entry -> presenter.message(session, entry));
         presenter.attachments(session);
         presenter.fileReferences(session);
@@ -473,8 +473,9 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         // 新版编辑器随发送命令提交引用顺序，旧版命令继续使用当前会话顺序。
         if (referenceIds != null && !applySendReferenceOrder(session, text, referenceIds)) return;
         if (text.isBlank() && session.attachments().isEmpty() && session.fileReferences().isEmpty()) return;
-        if (session.busy()) {
+        if (session.busy() || !session.queuedInputs().isEmpty()) {
             enqueueInput(text);
+            startNextQueuedInput(session);
             return;
         }
         var settingsService = CodexSettingsState.getInstance();
@@ -578,16 +579,121 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
     private QueuedInput prepareInput(ConversationSession session, String text) {
         var settings = CodexSettingsState.getInstance().getState();
         var editorContext = settings.sendOpenedFilePath ? listener.currentEditorContext() : null;
-        var inputText = editorContext == null ? text : editorContext.appendTo(text);
         var sentAttachments = List.copyOf(session.attachments());
         var sentFileReferences = List.copyOf(session.fileReferences());
+        return prepareInput(null, text, editorContext, sentAttachments, sentFileReferences);
+    }
+
+    private QueuedInput prepareInput(String id, String text, EditorFileContext editorContext,
+                                    List<Attachment> sentAttachments, List<FileReference> sentFileReferences) {
+        var inputText = editorContext == null ? text : editorContext.appendTo(text);
         var display = new StringBuilder(embedFileReferencePaths(text, sentFileReferences));
         if (editorContext != null) display.append(UiMessages.message("\n\n[当前编辑器上下文] ")).append(editorContext.displayLabel());
         sentAttachments.forEach(attachment -> display.append("\n").append(switch (attachment.kind()) {
             case IMAGE -> UiMessages.message("[图片] ");
             case FILE -> "@";
         }).append(attachment.kind() == Attachment.Kind.FILE ? absolutePath(attachment.path()) : attachment.name()));
-        return new QueuedInput(inputText, display.toString().trim(), sentAttachments, sentFileReferences);
+        return new QueuedInput(id, text, editorContext, inputText, display.toString().trim(), sentAttachments, sentFileReferences);
+    }
+
+    void queuedInputAction(String id, String action, String text) {
+        var session = activeSession();
+        if (session.historyReadOnly()) return;
+        var input = session.queuedInputs().stream().filter(item -> item.id().equals(id)).findFirst().orElse(null);
+        if (input == null) {
+            presenter.queue(session);
+            presenter.toast(session, UiMessages.message("该排队消息已发送或移除"));
+            return;
+        }
+        if (action.equals("steer")) {
+            steerQueuedInput(session, input);
+            return;
+        }
+        if (action.equals("edit")) session.editingQueuedInputId(id);
+        else if (action.equals("cancel")) {
+            if (Objects.equals(session.editingQueuedInputId(), id)) session.editingQueuedInputId(null);
+        } else if (action.equals("delete")) {
+            session.queuedInputs().remove(input);
+            if (Objects.equals(session.editingQueuedInputId(), id)) session.editingQueuedInputId(null);
+        } else if (action.equals("save")) {
+            var updated = editQueuedInput(input, text.trim());
+            if (updated.text().isBlank() && updated.attachments().isEmpty() && updated.fileReferences().isEmpty()) {
+                presenter.toast(session, UiMessages.message("消息不能为空，请使用删除按钮移除"));
+                return;
+            }
+            session.queuedInputs().set(session.queuedInputs().indexOf(input), updated);
+            if (Objects.equals(session.editingQueuedInputId(), id)) session.editingQueuedInputId(null);
+        } else return;
+        presenter.queue(session);
+        if (!action.equals("edit")) startNextQueuedInput(session);
+    }
+
+    private QueuedInput editQueuedInput(QueuedInput input, String edited) {
+        var remaining = new ArrayList<>(input.fileReferences());
+        var references = new ArrayList<FileReference>();
+        var text = new StringBuilder();
+        var offset = 0;
+        while (!remaining.isEmpty()) {
+            FileReference next = null;
+            var position = -1;
+            var tokenLength = 0;
+            for (var reference : remaining) {
+                var token = "@" + absolutePath(reference.path());
+                var found = edited.indexOf(token, offset);
+                while (found >= 0 && found + token.length() < edited.length()
+                    && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_./\\-".indexOf(edited.charAt(found + token.length())) >= 0)
+                    found = edited.indexOf(token, found + 1);
+                if (found >= 0 && (position < 0 || found < position || (found == position && token.length() > tokenLength))) {
+                    next = reference; position = found; tokenLength = token.length();
+                }
+            }
+            if (next == null) break;
+            text.append(edited, offset, position).append('\uFFFC');
+            references.add(next);
+            remaining.remove(next);
+            offset = position + tokenLength;
+        }
+        text.append(edited.substring(offset));
+        return prepareInput(input.id(), text.toString(), input.editorContext(), input.attachments(), references);
+    }
+
+    private void steerQueuedInput(ConversationSession session, QueuedInput input) {
+        if (session.queuedSteerPending() || session.queuedInputs().getFirst() != input
+            || Objects.equals(session.editingQueuedInputId(), input.id())) return;
+        if (!Objects.equals(session.provider(), "codex") || !session.busy() || !codex.isConnected()
+            || session.threadId() == null || session.providerTurnId() == null || session.providerTurnId().isBlank()) {
+            presenter.toast(session, UiMessages.message("当前回合尚未准备好接收引导，消息仍在队列中"));
+            return;
+        }
+        var handle = session.handle();
+        var threadId = session.threadId();
+        // 先从待发送队列取走，避免等待 RPC 时回合结束又将同一消息出队。
+        session.queuedInputs().removeFirst();
+        session.queuedSteerPending(true);
+        session.pendingUserMessageCount(session.pendingUserMessageCount() + 1);
+        presenter.queue(session);
+        CompletableFuture<JsonObject> result;
+        try {
+            result = codex.steerTurn(threadId, session.providerTurnId(), input.inputText(), input.attachments(), input.fileReferences());
+        } catch (RuntimeException error) {
+            result = CompletableFuture.failedFuture(error);
+        }
+        result.whenComplete((ignored, error) -> ApplicationManager.getApplication().invokeLater(() -> {
+            if (sessionRegistry.find(session.id()) != session || !Objects.equals(session.threadId(), threadId)
+                || confirmedSessionIds.contains(session.id().value())) return;
+            session.queuedSteerPending(false);
+            if (error == null) {
+                addEntry(session, new ConversationEntry(ConversationEntry.Kind.USER, UiMessages.message("你"), input.display(), null,
+                    input.fileReferences().stream().map(reference -> absolutePath(reference.path())).toList()));
+                presenter.queue(session);
+            } else {
+                if (session.matches(handle)) session.pendingUserMessageCount(Math.max(0, session.pendingUserMessageCount() - 1));
+                session.queuedInputs().addFirst(input);
+                presenter.queue(session);
+                presenter.toast(session, UiMessages.message("引导失败，消息已恢复到队列") + ": " + unwrap(error).getMessage());
+                if (codex.isConnected()) startNextQueuedInput(session);
+            }
+        }));
     }
 
     private void enqueueInput(String text) {
@@ -596,14 +702,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             && listener.handleNativeCommand(text)) return;
         var input = prepareInput(session, text);
         session.queuedInputs().add(input);
-        addEntry(session, new ConversationEntry(
-            ConversationEntry.Kind.USER,
-            UiMessages.message("你"),
-            input.display(),
-            null,
-            input.fileReferences().stream().map(reference -> absolutePath(reference.path())).toList()
-        ));
-        session.pendingUserMessageCount(session.pendingUserMessageCount() + 1);
+        // 待发送内容仅属于队列，真正出队时才进入聊天记录并等待供应商回推。
         workspaceInput.clearInputs(session);
         presenter.queue(session);
     }
@@ -988,9 +1087,10 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
 
     private void startNextQueuedInput(ConversationSession session) {
         if (session.busy() || session.queuedInputs().isEmpty()) return;
+        if (Objects.equals(session.editingQueuedInputId(), session.queuedInputs().getFirst().id())) return;
         var next = session.queuedInputs().removeFirst();
         presenter.queue(session);
-        dispatchInput(session, next, false);
+        dispatchInput(session, next, true);
     }
 
     private String embedFileReferencePaths(String text, List<FileReference> references) {
@@ -1021,7 +1121,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             approvalCoordinator.clearTurn(turnHandle);
             sessionCoordinator.cancel(session.id());
             session.pendingUserBody(null);
-            session.pendingUserMessageCount(session.queuedInputs().size());
+            session.pendingUserMessageCount(0);
             claudeProvider.cancel(turnHandle);
             presenter.busy(session);
             startNextQueuedInput(session);
@@ -1031,7 +1131,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
         approvalCoordinator.clearTurn(turnHandle);
         sessionCoordinator.cancel(session.id());
         session.pendingUserBody(null);
-        session.pendingUserMessageCount(session.queuedInputs().size());
+        session.pendingUserMessageCount(0);
         presenter.busy(session);
         codexProvider.cancel(turnHandle);
         changeService.finishCommands(session.id().value());

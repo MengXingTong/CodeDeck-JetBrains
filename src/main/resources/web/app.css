@@ -252,6 +252,25 @@ button { color: inherit; }
 .task-row small { color: var(--muted); font-size: 9px; }
 .status-actions { display: flex; gap: 5px; }
 .change-list { overflow: auto; }
+.queued-inputs { flex-shrink: 0; margin: 4px 16px 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--bar); overflow: hidden; font-size: 12px; }
+.queued-inputs-heading { display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; color: var(--muted); border-bottom: 1px solid var(--border); font-size: 11px; }
+.queued-input-list { max-height: min(240px,32vh); overflow-y: auto; }
+.queued-input { padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+.queued-input:last-child { border-bottom: 0; }
+.queued-input-top { display: flex; align-items: flex-start; gap: 8px; }
+.queued-input-number { color: var(--muted); min-width: 12px; line-height: 26px; }
+.queued-input-text { flex: 1; min-width: 0; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.queued-input-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
+.queued-input-actions button { display: flex; align-items: center; justify-content: center; gap: 4px; min-width: 26px; height: 26px; padding: 3px 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.queued-input-actions button:hover { background: var(--hover); color: var(--text); }
+.queued-input-actions .queued-input-steer { color: var(--accent); border-color: var(--border); }
+.queued-input-actions button:disabled { opacity: .45; cursor: default; }
+.queued-input-actions svg,.queued-input-metadata svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; flex-shrink: 0; }
+.queued-input-metadata { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0 20px; color: var(--muted); font-size: 10px; }
+.queued-input-metadata span { display: flex; align-items: center; gap: 3px; max-width: 100%; overflow-wrap: anywhere; }
+.queued-input-editor { margin: 6px 0 0 20px; }
+.queued-input-editor textarea { display: block; width: 100%; min-height: 72px; max-height: 160px; resize: vertical; padding: 8px; border: 1px solid var(--accent); border-radius: 5px; background: var(--bg); color: var(--text); font: inherit; line-height: 1.5; }
+.queued-input-edit-actions { display: flex; justify-content: flex-end; gap: 6px; padding-top: 6px; }
 .change-row { min-height: 38px; display: grid; grid-template-columns: 17px minmax(0,1fr) auto auto; align-items: center; gap: 7px; padding: 6px 9px; border-bottom: 1px solid var(--hairline); }
 .change-row:hover { background: rgba(255,255,255,.035); }
 .change-kind { width: 17px; height: 17px; display: grid; place-items: center; border-radius: 3px; font: 600 10px var(--code-font); }

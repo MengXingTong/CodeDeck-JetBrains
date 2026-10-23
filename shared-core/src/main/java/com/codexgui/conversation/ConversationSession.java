@@ -26,6 +26,8 @@ public final class ConversationSession {
     private int pendingUserMessageCount;
     private boolean busy;
     private boolean historyReadOnly;
+    private String editingQueuedInputId;
+    private boolean queuedSteerPending;
     private long usageUsedTokens;
     private long usageMaxTokens;
     private final List<Attachment> attachments = new ArrayList<>();
@@ -80,6 +82,10 @@ public final class ConversationSession {
     }
     public List<ConversationEntry> transcript() { return transcript; }
     public List<QueuedInput> queuedInputs() { return queuedInputs; }
+    public String editingQueuedInputId() { return editingQueuedInputId; }
+    public void editingQueuedInputId(String value) { editingQueuedInputId = value; }
+    public boolean queuedSteerPending() { return queuedSteerPending; }
+    public void queuedSteerPending(boolean value) { queuedSteerPending = value; }
 
     public TurnHandle beginTurn() {
         generation++;
@@ -130,5 +136,7 @@ public final class ConversationSession {
         clearFileReferences();
         transcript.clear();
         queuedInputs.clear();
+        editingQueuedInputId = null;
+        queuedSteerPending = false;
     }
 }

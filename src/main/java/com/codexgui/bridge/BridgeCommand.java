@@ -32,6 +32,7 @@ public sealed interface BridgeCommand permits BridgeCommand.V1 {
         RECONNECT("reconnect"),
         SEND("send"),
         STEER("steer"),
+        QUEUED_INPUT("queuedInput"),
         STOP("stop"),
         NEW("new"),
         CLOSE_SESSION("closeSession"),

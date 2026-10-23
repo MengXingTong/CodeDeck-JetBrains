@@ -519,7 +519,7 @@ test('运行中普通发送进入队列且可显式立即引导', async ({page})
   await page.evaluate(() => CodexGui.receive(previewEnvelope('busy', {busy: true, queuedCount: 0})));
 
   await expect(page.getByTitle('排队发送')).toBeVisible();
-  await expect(page.getByTitle('立即引导')).toBeVisible();
+  await expect(page.locator('[data-action="steer"]')).toHaveCount(0);
   await expect(page.getByTitle('停止')).toBeVisible();
 
   await editor.pressSequentially('稍后处理');
@@ -529,13 +529,15 @@ test('运行中普通发送进入队列且可显式立即引导', async ({page})
   }).previewLastMessage);
   expect(queued).toMatchObject({type: 'send', payload: {text: '稍后处理', referenceIds: []}});
 
-  await page.evaluate(() => CodexGui.receive(previewEnvelope('queue', {queuedCount: 1})));
+  await page.evaluate(() => CodexGui.receive(previewEnvelope('queue', {queuedCount: 1,
+    queuedInputs: [{id: 'queued-first', text: '稍后处理'}], canSteer: true})));
   await expect(page.getByRole('status')).toContainText('已排队 1 条');
 
-  await editor.pressSequentially('立即调整方向');
+  await editor.pressSequentially('保留在输入框中的草稿');
   await page.getByTitle('立即引导').click();
   const steered = await page.evaluate(() => (window as Window & {
     previewLastMessage?: {type: string; payload: {text: string; referenceIds: string[]}};
   }).previewLastMessage);
-  expect(steered).toMatchObject({type: 'steer', payload: {text: '立即调整方向', referenceIds: []}});
+  expect(steered).toMatchObject({type: 'queuedInput', payload: {id: 'queued-first', action: 'steer'}});
+  await expect(editor).toHaveText('保留在输入框中的草稿');
 });
