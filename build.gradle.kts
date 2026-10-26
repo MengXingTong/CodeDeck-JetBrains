@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.codexgui"
-version = "2.1.4"
+version = "2.1.5"
 
 repositories {
     mavenCentral()
@@ -49,6 +49,23 @@ sourceSets {
     main {
         resources.srcDir(layout.buildDirectory.dir("generated-resources"))
     }
+}
+
+val historyBridgeJar by tasks.registering(Jar::class) {
+    dependsOn(":shared-core:classes")
+    archiveFileName.set("history-bridge.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("history-bridge"))
+    manifest { attributes["Main-Class"] = "com.codexgui.history.CodeDeckHistoryMcp" }
+    from(project(":shared-core").layout.buildDirectory.dir("classes/java/main")) { include("com/codexgui/history/**") }
+    from(provider { configurations.runtimeClasspath.get().filter { it.name.startsWith("gson-") }.map { zipTree(it) } }) {
+        exclude("META-INF/**", "module-info.class")
+    }
+}
+
+val prepareHistoryBridge by tasks.registering(Copy::class) {
+    dependsOn(historyBridgeJar)
+    from(historyBridgeJar.flatMap { it.archiveFile })
+    into(layout.buildDirectory.dir("generated-resources"))
 }
 
 val frontendTypecheck by tasks.registering(NpmTask::class) {
@@ -127,7 +144,7 @@ intellijPlatform {
 
 tasks {
     processResources {
-        dependsOn(frontendBundle)
+        dependsOn(frontendBundle, prepareHistoryBridge)
     }
 
     check {

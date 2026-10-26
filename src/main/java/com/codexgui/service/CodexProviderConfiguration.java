@@ -4,7 +4,6 @@ import com.codexgui.i18n.UiMessages;
 
 import com.codexgui.settings.CodexSettingsState;
 import com.codexgui.settings.ProviderCredentialStore;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -14,6 +13,8 @@ public final class CodexProviderConfiguration {
     private CodexProviderConfiguration() {}
     public static List<String> arguments(CodexSettingsState.ProviderProfileSnapshot provider) {
         var arguments = new ArrayList<String>();
+        // An inherited sqlite_home must not reconnect isolated sessions to the desktop's index.
+        arguments.addAll(List.of("-c", "sqlite_home=" + tomlString(CodexSessionStorage.home().toString())));
         if (!provider.builtIn()) {
             arguments.addAll(List.of("-c", "model_provider=\"codex_gui\"",
                     "-c", "model_providers.codex_gui.name=" + tomlString(provider.name()),
@@ -24,9 +25,12 @@ public final class CodexProviderConfiguration {
         return List.copyOf(arguments);
     }
     public static void applyEnvironment(ProcessBuilder builder, CodexSettingsState.ProviderProfileSnapshot provider) {
-        var codexHome = System.getenv("CODEX_HOME");
-        if (codexHome == null || codexHome.isBlank()) codexHome = Path.of(System.getProperty("user.home", "."), ".codex").toString();
-        builder.environment().put("CODEX_HOME", codexHome);
+        try {
+            builder.environment().put("CODEX_HOME", CodexSessionStorage.prepare().toString());
+            builder.environment().put("CODEX_SQLITE_HOME", CodexSessionStorage.home().toString());
+        } catch (java.io.IOException error) {
+            throw new IllegalStateException("Cannot prepare CodeDeck's isolated Codex storage", error);
+        }
         if (!provider.builtIn()) {
             // A queued batch must not send a replacement credential to a previous provider URL.
             var current = CodexSettingsState.getInstance().activeProvider(CodexSettingsState.CODEX_CHANNEL).snapshot();

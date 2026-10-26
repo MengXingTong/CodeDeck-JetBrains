@@ -6,5 +6,6 @@ out/
 node_modules/
 playwright-report/
 test-results/
+__pycache__/
 *.iml
 AGENTS.md

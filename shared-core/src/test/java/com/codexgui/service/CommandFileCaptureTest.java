@@ -14,6 +14,88 @@ import static org.junit.jupiter.api.Assertions.*;
 class CommandFileCaptureTest {
     @TempDir Path root;
 
+    @Test void capturesPythonInterpolatedPathsInInlinePowerShellScripts() throws Exception {
+        var ability = Files.createDirectories(root.resolve("Source/Game/Ability"));
+        var medicine = Files.writeString(ability.resolve("GMedicineGameplayAbility.cpp"), "medicine before\r\n");
+        var prop = Files.writeString(ability.resolve("GPropGameplayAbility.cpp"), "prop before\r\n");
+        var unrelated = Files.writeString(ability.resolve("Other.cpp"), "user before");
+        var capture = new CommandFileCapture(root);
+        capture.started("inline", """
+            powershell.exe -Command "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+            @'
+            from pathlib import Path
+            root = Path.cwd()
+            changed = []
+            for kind, rid in [('Medicine', 'medicineRid'), ('Prop', 'propRid')]:
+                path = root / f'Source/Game/Ability/G{kind}GameplayAbility.cpp'
+                changed.append((path, path.read_bytes(), b'after'))
+            for path, original, data in changed:
+                path.write_bytes(data)
+            '@ | python -"
+            """, root.toString());
+        assertEquals(Set.of(medicine, prop), capture.snapshot("inline").stream()
+            .filter(CommandFileCapture.Before::exists).map(CommandFileCapture.Before::path)
+            .collect(java.util.stream.Collectors.toSet()));
+        Files.writeString(medicine, "medicine after\n"); Files.writeString(prop, "prop after\n");
+        Files.writeString(unrelated, "concurrent user edit");
+        var changes = capture.completed("inline");
+        assertEquals(Set.of(medicine, prop), changes.stream().map(CommandFileCapture.Before::path)
+            .collect(java.util.stream.Collectors.toSet()));
+        assertArrayEquals("medicine before\r\n".getBytes(StandardCharsets.UTF_8), changes.stream()
+            .filter(before -> before.path().equals(medicine)).findFirst().orElseThrow().bytes());
+    }
+
+    @Test void interpolatedScopesDetectAdditionsDeletionsAndRespectIgnoreRules() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var deleted = Files.writeString(source.resolve("BattleItemHelper.h"), "header before");
+        var kept = Files.writeString(source.resolve("BattleItemHelper.cpp"), "source before");
+        var ignored = Files.writeString(source.resolve("BattleItemHelper.log"), "log before");
+        var excluded = Files.writeString(source.resolve("BattleItemHelper.private"), "private before");
+        var unrelated = Files.writeString(source.resolve("other.cpp"), "user before");
+        var capture = new CommandFileCapture(root, (path, directory) -> path.equals(excluded));
+        capture.started("extensions", "python -c \"path = Path(f'Source/BattleItemHelper.{suffix}'); path.write_bytes(data)\"", null);
+        Files.delete(deleted); Files.writeString(kept, "source after");
+        var added = Files.writeString(source.resolve("BattleItemHelper.txt"), "new file");
+        Files.writeString(ignored, "background log"); Files.writeString(excluded, "private after");
+        Files.writeString(unrelated, "concurrent user edit");
+        assertEquals(Set.of(deleted, kept, added), capture.completed("extensions").stream()
+            .map(CommandFileCapture.Before::path).collect(java.util.stream.Collectors.toSet()));
+    }
+
+    @Test void interpolatedScopesRemainBoundedAndDoNotClaimReadOnlyOrRootPaths() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("GMedicine.cpp"), "before");
+        var rootFile = Files.writeString(root.resolve("GMedicine.cpp"), "root before");
+        var capture = new CommandFileCapture(root);
+        for (var command : List.of("Get-Content f'Source/G{kind}.cpp'", "python -c \"Path(f'G{kind}.cpp').write_bytes(data)\"")) {
+            capture.started("excluded", command, null);
+            assertTrue(capture.snapshot("excluded").stream().noneMatch(CommandFileCapture.Before::exists), command);
+            Files.writeString(file, "user edit"); Files.writeString(rootFile, "root edit");
+            assertTrue(capture.completed("excluded").isEmpty(), command);
+        }
+        for (int i = 0; i < 520; i++) Files.writeString(source.resolve("other-" + i + ".txt"), "before");
+        capture.started("oversized", "python -c \"Path(f'Source/G{kind}.cpp').write_bytes(data)\"", null);
+        Files.writeString(file, "after oversized command");
+        assertTrue(capture.completed("oversized").isEmpty());
+    }
+
+    @Test void filenameTemplatesDoNotTraverseUnrelatedChildTreesOrResolveExpressions() throws Exception {
+        var source = Files.createDirectories(root.resolve("Source"));
+        var file = Files.writeString(source.resolve("GMedicine.cpp"), "before");
+        var child = Files.createDirectories(source.resolve("Other"));
+        for (int i = 0; i < 520; i++) Files.writeString(child.resolve(i + ".cpp"), "user before");
+        var capture = new CommandFileCapture(root);
+        capture.started("template", "python -c \"Path(f'Source/G{kind}.cpp').write_bytes(data)\"", null);
+        Files.writeString(file, "after"); Files.writeString(child.resolve("0.cpp"), "concurrent user edit");
+        assertEquals(List.of(file), capture.completed("template").stream().map(CommandFileCapture.Before::path).toList());
+        for (var command : List.of("python -c \"Path(f'Source/{helper()}.cpp').write_bytes(data)\"",
+            "python -c \"Path(f'../Source/G{kind}.cpp').write_bytes(data)\"")) {
+            capture.started("unknown", command, null);
+            Files.writeString(file, "after unknown expression");
+            assertTrue(capture.completed("unknown").isEmpty(), command);
+        }
+    }
+
     @Test void inferredScopesExcludeBackgroundLogsAndBuildOutputsBeforeReservingBaselines() throws Exception {
         var source = Files.createDirectories(root.resolve("Source"));
         var header = Files.writeString(source.resolve("BattleInMatchTaskComponent.h"), "before");

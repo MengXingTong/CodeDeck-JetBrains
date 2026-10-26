@@ -175,6 +175,8 @@ public final class CodexAppServerService implements Disposable {
             var command = createCommand(executable, provider);
             var builder = new ProcessBuilder(command);
             CodexProviderConfiguration.applyEnvironment(builder, provider);
+            try { CodexSessionStorage.installHistoryBridge(executable); }
+            catch (IOException error) { LOG.warn("Could not register CodeDeck's read-only history bridge", error); }
             if (project.getBasePath() != null) builder.directory(Path.of(project.getBasePath()).toFile());
             var process = builder.start();
             var startedContext = new ProcessContext(
@@ -200,7 +202,7 @@ public final class CodexAppServerService implements Disposable {
             var clientInfo = new JsonObject();
             clientInfo.addProperty("name", "codedeck-jetbrains");
             clientInfo.addProperty("title", "CodeDeck for JetBrains");
-            clientInfo.addProperty("version", "2.1.4");
+            clientInfo.addProperty("version", "2.1.5");
             var params = new JsonObject();
             params.add("clientInfo", clientInfo);
             params.add("capabilities", capabilities);
@@ -524,7 +526,11 @@ public final class CodexAppServerService implements Disposable {
         var params = new JsonObject();
         params.addProperty("threadId", threadId);
         params.addProperty("name", name);
-        return request("thread/name/set", params);
+        return request("thread/name/set", params).thenApply(result -> {
+            try { CodexSessionStorage.saveTitle(threadId, name); }
+            catch (IOException error) { LOG.warn("Could not save CodeDeck history search title", error); }
+            return result;
+        });
     }
 
     public CompletableFuture<JsonObject> rollbackThread(String threadId) {

@@ -11,9 +11,8 @@ public final class CodexModelCatalog {
     private CodexModelCatalog() {}
     public static List<String> load() {
         try {
-            String home = System.getenv("CODEX_HOME");
-            Path directory = home == null || home.isBlank() ? Path.of(System.getProperty("user.home"), ".codex") : Path.of(home);
-            return load(directory);
+            var isolated = load(CodexSessionStorage.home());
+            return isolated.isEmpty() ? load(CodexSessionStorage.sharedHome()) : isolated;
         } catch (Exception ignored) { return List.of(); }
     }
     static List<String> load(Path directory) {

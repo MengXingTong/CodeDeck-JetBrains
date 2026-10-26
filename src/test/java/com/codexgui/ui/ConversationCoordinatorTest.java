@@ -99,6 +99,66 @@ final class ConversationCoordinatorTest {
     }
 
     @Test
+    void inlinePythonBatchEditsFromRawCodeModeCallsKeepBaselinesAndRollback() throws Exception {
+        var ability = Files.createDirectories(root.resolve("Source/Game/Ability"));
+        var helper = Files.createDirectories(root.resolve("Source/Game/Helper"));
+        var medicine = Files.writeString(ability.resolve("GMedicineGameplayAbility.cpp"), "\ufeffmedicine before\r\n");
+        var prop = Files.writeString(ability.resolve("GPropGameplayAbility.cpp"), "prop before\r\n");
+        var header = Files.writeString(helper.resolve("BattleItemHelper.h"), "helper before\r\n");
+        var other = Files.writeString(ability.resolve("Other.cpp"), "user before\n");
+        var constructor = ConversationChangeTracker.class.getDeclaredConstructor(Path.class);
+        constructor.setAccessible(true);
+        var tracker = constructor.newInstance(root);
+        var registry = new SessionRegistry(); var sessions = new SessionCoordinator(registry);
+        var background = registry.create(SessionId.of("background"));
+        var handle = sessions.beginTurn(background.id());
+        var codex = new CodexAppServerService(null);
+        try {
+            var coordinator = new ConversationCoordinator(null, null, codex, null, null, null,
+                tracker, null, registry, sessions, null, null, null, null,
+                new BridgeEventPresenter(null, null, registry, root), null);
+            var command = """
+                $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+                @'
+                from pathlib import Path
+                root = Path.cwd()
+                changed = []
+                for kind in ('Medicine', 'Prop'):
+                    path = root / f'Source/Game/Ability/G{kind}GameplayAbility.cpp'
+                    changed.append((path, path.read_bytes(), b'after'))
+                path = root / 'Source/Game/Helper/BattleItemHelper.h'
+                changed.append((path, path.read_bytes(), b'helper after'))
+                for path, original, data in changed:
+                    path.write_bytes(data)
+                '@ | python -
+                """;
+            var input = "text(await tools.exec_command(" + new com.google.gson.Gson().toJson(
+                Map.of("cmd", command, "workdir", root.toString())) + "));";
+            coordinator.captureCodexCommand(new TurnEvent.Item(handle, TurnEvent.Item.Phase.STARTED, "raw:batch", "rawToolCall",
+                Map.of("name", "exec", "input", input)));
+            Files.writeString(medicine, "medicine after\n"); Files.writeString(prop, "prop after\n");
+            Files.writeString(header, "helper after\n"); Files.writeString(other, "concurrent user edit\n");
+            // Native command events can arrive after the raw call has already changed disk.
+            coordinator.captureCodexCommand(new TurnEvent.Item(handle, TurnEvent.Item.Phase.STARTED, "native", "commandExecution",
+                Map.of("command", "powershell.exe -Command \"" + command + "\"", "cwd", root.toString())));
+            tracker.commandCompleted(background.id().value(), "native");
+            tracker.commandCompleted(background.id().value(), "raw:batch");
+            tracker.finishCommands(background.id().value());
+            assertEquals(java.util.Set.of(medicine, prop, header), tracker.listSummaries(background.id().value()).stream()
+                .map(ConversationChangeTracker.ChangeSummary::path).collect(java.util.stream.Collectors.toSet()));
+            assertTrue(tracker.listSummaries(registry.activeSessionId().value()).isEmpty());
+            assertEquals("\ufeffmedicine after\r\n", Files.readString(medicine));
+            assertEquals("prop after\r\n", Files.readString(prop));
+            tracker.revertAll(background.id().value());
+            assertEquals("\ufeffmedicine before\r\n", Files.readString(medicine));
+            assertEquals("prop before\r\n", Files.readString(prop));
+            assertEquals("helper before\r\n", Files.readString(header));
+            assertEquals("concurrent user edit\n", Files.readString(other));
+            assertTrue(tracker.listSummaries(background.id().value()).isEmpty());
+        } finally { tracker.dispose(); codex.dispose(); }
+    }
+
+    @Test
     void snapshotsOnlyTheCurrentSessionsCommandBeforeUiDispatch() throws Exception {
         var path = root.resolve("deleted.cpp"); Files.writeString(path, "before\n");
         var constructor = ConversationChangeTracker.class.getDeclaredConstructor(Path.class);

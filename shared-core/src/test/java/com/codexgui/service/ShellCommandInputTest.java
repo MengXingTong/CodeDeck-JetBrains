@@ -23,4 +23,15 @@ class ShellCommandInputTest {
         assertTrue(ShellCommandInput.parse("exec_command", "malformed").isEmpty());
         assertTrue(ShellCommandInput.parse("exec", "x".repeat(2 * 1024 * 1024 + 1)).isEmpty());
     }
+
+    @Test void decodesLongEscapedInlineScriptsWithoutOverflowingTheRegexStack() {
+        var command = "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n@'\n"
+            + "# quoted 'text' and \"escaped\" strings, braces {kind} and backslashes \\\\n\n".repeat(2000)
+            + "path = root / f'Source/G{kind}.cpp'\npath.write_bytes(data)\n'@ | python -";
+        var call = new Gson().toJson(Map.of("cmd", command, "workdir", "D:\\project"));
+        var input = "text(await tools.exec_command(" + call + "));\n"
+            + "text(await tools.exec_command({cmd:'Get-Content Source/file.cpp',workdir:'repo'}));";
+        assertEquals(List.of(new ShellCommandInput(command, "D:\\project"),
+            new ShellCommandInput("Get-Content Source/file.cpp", "repo")), ShellCommandInput.parse("exec", input));
+    }
 }

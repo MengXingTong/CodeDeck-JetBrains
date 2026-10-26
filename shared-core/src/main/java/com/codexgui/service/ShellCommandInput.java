@@ -7,8 +7,9 @@ import java.util.regex.Pattern;
 
 /** Literal shell arguments from raw tool calls; never evaluates generated JavaScript. */
 public record ShellCommandInput(String command, String cwd) {
-    private static final String STRING = "\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'";
-    private static final Pattern CALL = Pattern.compile("(?:tools\\.)?(?:exec_command|shell_command)\\s*\\(\\s*\\{((?:" + STRING + "|[^{}])*?)}", Pattern.DOTALL);
+    // Possessive repetitions keep long escaped script literals off the regex backtracking stack.
+    private static final String STRING = "\"(?:\\\\.|[^\"\\\\])*+\"|'(?:\\\\.|[^'\\\\])*+'";
+    private static final Pattern CALL = Pattern.compile("(?:tools\\.)?(?:exec_command|shell_command)\\s*\\(\\s*\\{((?:" + STRING + "|[^{}'\"])*+)}", Pattern.DOTALL);
     private static final Pattern FIELD = Pattern.compile("(?:\"(cmd|command|workdir|cwd)\"|'(cmd|command|workdir|cwd)'|\\b(cmd|command|workdir|cwd))\\s*:\\s*(" + STRING + ")", Pattern.DOTALL);
 
     public static List<ShellCommandInput> parse(String name, String input) {

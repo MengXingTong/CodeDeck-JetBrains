@@ -4,6 +4,8 @@
 
 根工程提供 JetBrains 插件，`shared-core` 是其内部纯 Java 模块，负责会话模型、协议和文件修改等通用逻辑。插件构建只依赖本仓库源码；桌面端在独立目录维护自己的核心与前端源码副本。
 
+`CodexSessionStorageTest` 验证首次配置继承、后续登录/配置独立与工具资源共用；`CodeDeckHistoryMcpTest` 验证只读工具、标题检索、长元数据、分页、运行中残行和路径边界。`historyBridgeJar` 将只读入口与 Gson 打成自带 Java 可运行的独立 JAR，插件连接时导出注册。可运行 `python tools/test-session-isolation.py --codex <本机 codex 可执行文件>`，使用本地 HTTP 模型 fixture 和真实 app-server 验证：跳过占用会话、按来源迁移、原生回合及模型上下文保留、新建/恢复独立会话、桌面端扫描不发现插件会话、原配置与桌面会话保留。不会请求外部模型。
+
 在项目根目录执行：
 
 ```shell

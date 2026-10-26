@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Current build: **2.1.4**.
+Current build: **2.1.5**.
 
 **Understand and review code in JetBrains IDEs, with AI assistance.**
 
@@ -25,7 +25,11 @@ During a running task, Send and the send shortcut add messages to the ordered qu
 
 Command fallback capture filters logs, build outputs, and paths excluded by the project's **ChangeList → Ignore list / resume tracking** rules. Known read-only commands do not claim concurrent file changes. Explicit patches, file edits, and recognized writes to literal file paths remain captured, including ignored files. Rule changes apply to subsequent turns.
 
+Inline Python scripts can also use file-name templates such as `f'Source/Ability/G{kind}GameplayAbility.cpp'`. Capture matches the template within its fixed subdirectory, preserving the original contents for Diff and undo. Long scripts in Code Mode tool calls are supported; matching keeps the same capture limits and ignore rules.
+
 Codex history opens as a saved snapshot without claiming the original chat. Use **Refresh history** to read updates, **Continue original chat** to resume it when available, or **Copy to a new chat** to continue independently while another client holds the original. These actions preserve your input draft and attached files.
+
+CodeDeck stores Codex chats in `$CODEX_HOME/codedeck/jetbrains` (default: `~/.codex/codedeck/jetbrains`), with separate session logs, databases and writer locks. New plugin chats stay out of the Codex desktop sidebar. On first use, local configuration and cached credentials are imported once; subsequent configuration and login changes are independent. Skills and plugin assets are shared. A bundled read-only `codedeck_history` MCP server lets the desktop agent search and read saved plugin chats; restart the desktop after its first registration. Native desktop `@chat` references are no longer supported for these chats. See [migration instructions](docs/usage-details.md#codex-会话独立存储) for existing plugin history.
 
 ## Screenshots
 

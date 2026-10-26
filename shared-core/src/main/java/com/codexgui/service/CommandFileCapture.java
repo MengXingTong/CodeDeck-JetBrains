@@ -28,6 +28,7 @@ public final class CommandFileCapture {
     private static final long MAX_CAPTURE_BYTES = 16L * 1024 * 1024;
     private static final Pattern QUOTED = Pattern.compile("(?=(['\"])([^'\"\\r\\n]+)\\1)");
     private static final Pattern TOKEN = Pattern.compile("[^\\s'\"`$<>|*?=,;()\\[\\]{}]+");
+    private static final Pattern INTERPOLATION = Pattern.compile("\\{[A-Za-z_][A-Za-z_0-9]*}");
     private static final Pattern FILE_NAME = Pattern.compile(".*\\.[\\p{L}\\p{N}_+-]{1,32}");
     private static final Pattern SCRIPT = Pattern.compile("(?i).*\\.(?:mjs|cjs|js|py|ps1|sh|cmd|bat)$");
     private static final Pattern RENAME = Pattern.compile("(?i)\\b(?:Rename-Item|ren|rename)\\s+(?:(?:-LiteralPath|-Path)\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)\\s+(?:-NewName\\s+)?('[^'\\r\\n]+'|\"[^\"\\r\\n]+\"|[^\\s;]+)");
@@ -40,7 +41,8 @@ public final class CommandFileCapture {
     public record Before(Path path, boolean exists, byte[] bytes, boolean preserveFormat) {
         public Before(Path path, boolean exists, byte[] bytes) { this(path, exists, bytes, true); }
     }
-    private record Pending(List<Before> files, Map<Path, Set<Path>> directories, Set<Path> forgotten, boolean preserveFormat) { }
+    private record Scope(Path directory, String expression, int depth) { }
+    private record Pending(List<Before> files, Map<Scope, Set<Path>> directories, Set<Path> forgotten, boolean preserveFormat) { }
     private final WorkspacePathPolicy paths;
     private final BiPredicate<Path, Boolean> projectIgnores;
     private final Map<String, Pending> pending = new LinkedHashMap<>();
@@ -86,13 +88,14 @@ public final class CommandFileCapture {
         if (id == null || id.isBlank() || pending.containsKey(id) || pending.size() >= MAX_COMMANDS) return;
         var candidates = new LinkedHashSet<Path>();
         var explicitFiles = new LinkedHashSet<Path>();
+        var templates = new LinkedHashSet<Scope>();
         boolean preserveFormat = inputs.stream().noneMatch(input -> VcsCommandPaths.restores(input.command()));
         for (var input : inputs.stream().limit(16).toList()) {
             for (var segment : ShellCaptureIntent.captureSegments(input.command())) {
-                var mentioned = candidates(segment, input.cwd());
+                var mentioned = candidates(segment, input.cwd(), templates);
                 candidates.addAll(mentioned);
                 for (var writing : ShellCaptureIntent.explicitWriteSegments(segment))
-                    explicitFiles.addAll(candidates(writing, input.cwd()));
+                    explicitFiles.addAll(candidates(writing, input.cwd(), null));
             }
             try {
                 var base = input.cwd() == null || input.cwd().isBlank() ? paths.root() : Path.of(input.cwd());
@@ -101,7 +104,7 @@ public final class CommandFileCapture {
                 candidates.addAll(restored); explicitFiles.addAll(restored);
             } catch (RuntimeException ignored) { }
         }
-        var directories = new LinkedHashMap<Path, Set<Path>>();
+        var directories = new LinkedHashMap<Scope, Set<Path>>();
         var scopeBudget = new int[]{MAX_SCOPE_ENTRIES};
         // Scope computed paths to explicitly mentioned subdirectories or an executed script's directory.
         // Never enumerate the workspace root or follow links; oversized scopes are left to explicit paths.
@@ -111,10 +114,23 @@ public final class CommandFileCapture {
             var directory = Files.isDirectory(path) || !Files.exists(path) && !path.getFileName().toString().contains(".")
                 ? path : !explicitFiles.contains(path) && SCRIPT.matcher(path.toString()).matches() ? path.getParent() : null;
             if (directory == null || paths.normalize(directory) == null || ignored(directory, true)
-                || directories.keySet().stream().anyMatch(directory::startsWith)) continue;
-            var names = directoryFiles(directory, scopeBudget);
+                || directories.keySet().stream().anyMatch(scope -> directory.startsWith(scope.directory()) && scope.expression() == null)) continue;
+            var scope = new Scope(directory, null, MAX_SCOPE_DEPTH);
+            var names = directoryFiles(scope, scopeBudget);
             if (names == null || names.size() > MAX_PATHS - directories.values().stream().mapToInt(Set::size).sum()) continue;
-            directories.put(directory, names);
+            directories.put(scope, names);
+            candidates.addAll(names);
+        }
+        // An f-string identifies a file-name pattern, not a literal path or its entire parent tree.
+        // Keep its static directory boundary and match only that pattern before and after the command.
+        for (var scope : templates) {
+            if (ignored(scope.directory(), true) || directories.keySet().stream()
+                .anyMatch(existing -> scope.directory().startsWith(existing.directory()) && existing.expression() == null)) continue;
+            var names = directoryFiles(scope, scopeBudget);
+            if (names == null) continue;
+            var combined = new LinkedHashSet<>(candidates); combined.addAll(names);
+            if (combined.stream().filter(path -> !Files.isDirectory(path)).count() > MAX_PATHS) continue;
+            directories.put(scope, names);
             candidates.addAll(names);
         }
         var before = new ArrayList<Before>();
@@ -213,12 +229,15 @@ public final class CommandFileCapture {
         else references.put(bytes, count - 1);
     }
 
-    private Set<Path> directoryFiles(Path directory, int[] budget) {
+    private Set<Path> directoryFiles(Scope scope, int[] budget) {
+        var directory = scope.directory();
         if (paths.normalize(directory) == null || Files.isSymbolicLink(directory)) return null;
         if (!Files.exists(directory)) return Set.of();
+        var filter = scope.expression() == null ? null : Pattern.compile(scope.expression(),
+            directory.getFileSystem().getSeparator().equals("\\") ? Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE : 0);
         var found = new LinkedHashSet<Path>(); var complete = new boolean[]{true};
         try {
-            Files.walkFileTree(directory, Set.of(), MAX_SCOPE_DEPTH, new SimpleFileVisitor<>() {
+            Files.walkFileTree(directory, Set.of(), scope.depth(), new SimpleFileVisitor<>() {
                 private FileVisitResult count() {
                     if (budget[0]-- > 0) return FileVisitResult.CONTINUE;
                     complete[0] = false; return FileVisitResult.TERMINATE;
@@ -228,8 +247,9 @@ public final class CommandFileCapture {
                     return count();
                 }
                 @Override public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
-                    if (attributes.isDirectory()) complete[0] = false; // depth bound reached
-                    if (!metadata(file) && attributes.isRegularFile() && paths.normalize(file) != null && !ignored(file, false)) found.add(file);
+                    if (attributes.isDirectory() && filter == null) complete[0] = false; // depth bound reached
+                    if (!metadata(file) && attributes.isRegularFile() && paths.normalize(file) != null && !ignored(file, false)
+                        && (filter == null || filter.matcher(directory.relativize(file).toString().replace('\\', '/')).matches())) found.add(file);
                     return count();
                 }
                 @Override public FileVisitResult visitFileFailed(Path file, IOException error) {
@@ -240,7 +260,7 @@ public final class CommandFileCapture {
         } catch (IOException | SecurityException ignored) { return null; }
     }
 
-    private List<Path> candidates(String command, String cwd) {
+    private List<Path> candidates(String command, String cwd, Set<Scope> templates) {
         if (command == null || command.isBlank()) return List.of();
         Path base;
         try {
@@ -250,9 +270,20 @@ public final class CommandFileCapture {
         } catch (RuntimeException ignored) { return List.of(); }
         var found = new LinkedHashSet<Path>();
         var readable = command.replace("\\\"", "\"").replace("\\'", "'");
+        var tokenized = new StringBuilder(readable);
         var quoted = QUOTED.matcher(readable);
-        while (quoted.find() && found.size() < MAX_PATHS) add(found, base, quoted.group(2), true);
-        var tokens = TOKEN.matcher(readable);
+        while (quoted.find() && found.size() < MAX_PATHS) {
+            int quote = quoted.start(1);
+            boolean interpolated = quote > 0 && (readable.charAt(quote - 1) == 'f' || readable.charAt(quote - 1) == 'F')
+                && (quote < 2 || !Character.isJavaIdentifierPart(readable.charAt(quote - 2))) && quoted.group(2).contains("{");
+            if (interpolated) {
+                var scope = templateScope(base, quoted.group(2));
+                if (templates != null && scope != null && templates.size() < MAX_PATHS) templates.add(scope);
+                // Do not interpret fragments on either side of {name} as unrelated literal paths.
+                for (int i = quote - 1; i <= quoted.end(2); i++) tokenized.setCharAt(i, ' ');
+            } else add(found, base, quoted.group(2), true);
+        }
+        var tokens = TOKEN.matcher(tokenized);
         while (tokens.find() && found.size() < MAX_PATHS) add(found, base, tokens.group());
         var rename = RENAME.matcher(readable);
         while (rename.find() && found.size() < MAX_PATHS) {
@@ -263,6 +294,30 @@ public final class CommandFileCapture {
             } catch (RuntimeException ignored) { }
         }
         return List.copyOf(found);
+    }
+
+    private Scope templateScope(Path base, String candidate) {
+        if (candidate.length() > 4096 || candidate.matches(".*[\\r\\n\\t$`<>|*?=;()\\[\\]].*")) return null;
+        var value = candidate.replace('\\', '/');
+        var fields = INTERPOLATION.matcher(value);
+        if (!fields.find() || fields.replaceAll("").matches(".*[{}].*")) return null;
+        int slash = value.lastIndexOf('/', value.indexOf('{'));
+        if (slash < 0) return null;
+        try {
+            var directory = paths.normalize(base.resolve(value.substring(0, slash)));
+            if (directory == null) return null;
+            var relative = value.substring(slash + 1);
+            int depth = 1 + (int) relative.chars().filter(c -> c == '/').count();
+            if (depth > MAX_SCOPE_DEPTH) return null;
+            var expression = new StringBuilder(); int start = 0;
+            fields = INTERPOLATION.matcher(relative);
+            while (fields.find()) {
+                expression.append(Pattern.quote(relative.substring(start, fields.start()))).append("[^/]+");
+                start = fields.end();
+            }
+            expression.append(Pattern.quote(relative.substring(start)));
+            return new Scope(directory, expression.toString(), depth);
+        } catch (RuntimeException ignored) { return null; }
     }
 
     private boolean metadata(Path path) {

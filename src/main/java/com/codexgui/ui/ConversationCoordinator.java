@@ -201,7 +201,7 @@ final class ConversationCoordinator implements Disposable, CodexEventListener {
             });
             return;
         }
-        // app-server 读取共享 CODEX_HOME 的历史，不限制客户端来源或当前项目。
+        // app-server 只读取 CodeDeck 独立存储的历史，不限制当前项目。
         if (!codex.isConnected()) return;
         codex.listThreads(search).thenAccept(result -> {
             var items = new JsonArray();

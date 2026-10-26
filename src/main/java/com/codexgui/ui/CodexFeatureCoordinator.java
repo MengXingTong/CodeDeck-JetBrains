@@ -489,7 +489,7 @@ final class CodexFeatureCoordinator {
     }
 
     void openMcpConfig() {
-        var path = Path.of(System.getProperty("user.home"), ".codex", "config.toml");
+        var path = com.codexgui.service.CodexSessionStorage.home().resolve("config.toml");
         try {
             if (!Files.exists(path)) {
                 Files.createDirectories(path.getParent());
@@ -549,11 +549,7 @@ final class CodexFeatureCoordinator {
     }
 
     private Path userSkillsDirectory() {
-        var configuredHome = System.getenv("CODEX_HOME");
-        var codexHome = configuredHome == null || configuredHome.isBlank()
-            ? Path.of(System.getProperty("user.home"), ".codex")
-            : Path.of(configuredHome);
-        return codexHome.resolve("skills");
+        return com.codexgui.service.CodexSessionStorage.home().resolve("skills");
     }
 
     private void copySkillDirectory(Path source, Path target) throws IOException {
