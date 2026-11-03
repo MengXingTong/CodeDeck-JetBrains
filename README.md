@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Current build: **2.1.5**.
+Current build: **2.1.7**.
 
 **Understand and review code in JetBrains IDEs, with AI assistance.**
 
@@ -11,7 +11,7 @@ CodeDeck helps you inspect changes, understand the code through AI explanations 
 ## Features
 
 - **Understand each change.** Read AI explanations beside changed code to support your review. Generate annotations for one file or a batch.
-- **Project ChangeList.** Browse Git / Perforce changes in the left sidebar; double-click a file to open its diff.
+- **Project ChangeList.** Browse Git / Perforce changes in the left sidebar; double-click a file to open its diff. Manual refresh updates all VCS mappings in the IDE project and rechecks Perforce authentication caches, so a renewed shared P4V ticket can take effect. This also resets an earlier native update error that would otherwise block new changes from appearing. The tree stays limited to the project directory; cached results and refresh errors are labeled separately.
 - **Chat with code context.** Select code in a diff, drag files or folders into chat, or reference them with `@`.
 - **Changes per conversation.** Review AI edits in the chat's file list, open diffs, and accept or undo changes while keeping your scroll position.
 - **Line ending protection.** Preserve captured files' existing LF / CRLF and UTF-8 BOM by default. Disable it in Behavior settings when converting formats.

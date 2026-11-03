@@ -54,7 +54,7 @@ public final class CodeDeckHistoryMcp {
                 case "initialize" -> {
                     var initialized = new JsonObject(); initialized.addProperty("protocolVersion", "2024-11-05");
                     var capabilities = new JsonObject(); capabilities.add("tools", new JsonObject()); initialized.add("capabilities", capabilities);
-                    var info = new JsonObject(); info.addProperty("name", "codedeck_history"); info.addProperty("version", "2.1.5");
+                    var info = new JsonObject(); info.addProperty("name", "codedeck_history"); info.addProperty("version", "2.1.7");
                     initialized.add("serverInfo", info); initialized.addProperty("instructions", "Search and read saved CodeDeck JetBrains conversations with the read-only tools. This does not resume chats or modify their history.");
                     yield initialized;
                 }

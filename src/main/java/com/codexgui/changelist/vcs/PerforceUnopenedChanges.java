@@ -21,6 +21,8 @@ import com.codexgui.changelist.core.ProjectScope;
 import com.codexgui.changelist.settings.SidebarSettings;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.idea.perforce.perforce.PerforceContentRevision;
+import org.jetbrains.idea.perforce.application.PerforceManager;
+import org.jetbrains.idea.perforce.perforce.login.PerforceLoginManager;
 import org.jetbrains.idea.perforce.perforce.PerforceRunner;
 import org.jetbrains.idea.perforce.perforce.PerforceSettings;
 import org.jetbrains.idea.perforce.perforce.PerforcePhysicalConnectionParameters;
@@ -64,6 +66,20 @@ public final class PerforceUnopenedChanges implements UnopenedChanges, Disposabl
     }
     @Override public List<Entry> snapshot() { return liveUpdates.merge(entries); }
     @Override public String status() { return status; }
+    @Override public String nativeRefreshProblem() {
+        if (!ProjectLevelVcsManager.getInstance(project).checkVcsIsActive("Perforce")) return "";
+        if (!PerforceSettings.getSettings(project).ENABLED) return UiMessages.message("Perforce 当前处于离线状态");
+        if (!PerforceConnectionManager.getInstance(project).isInitialized())
+            return UiMessages.message("Perforce 连接尚未就绪，请稍后刷新");
+        return "";
+    }
+    @Override public void invalidateNativeRefresh() {
+        if (!ProjectLevelVcsManager.getInstance(project).checkVcsIsActive("Perforce")) return;
+        // Both caches can retain an authentication failure after P4V replaces the login ticket.
+        // Invalidation performs no network I/O; the following native update rechecks credentials.
+        PerforceLoginManager.getInstance(project).clearAll();
+        PerforceManager.getInstance(project).clearInfoClientCache();
+    }
     @Override public void refreshPaths(List<Path> paths) { live.requestImmediate(paths); }
     @Override public void operationCompleted(FileVcsOperations.Result result) {
         if (disposed || project.isDisposed()) return;

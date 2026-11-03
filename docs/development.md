@@ -22,6 +22,10 @@
 ./gradlew clean check buildPlugin verifyPlugin
 ```
 
+`NativeVcsRefreshTest` 使用可控的 VFS 与 VCS 完成回调验证手动刷新时序、项目及文件范围、Perforce 登录过期/离线、外部登录更新票据后的连接缓存失效、失败后重试和异步异常释放，避免读取旧缓存或空更新队列时提前报告刷新完成。
+
+`NativeVcsRefreshIntegrationTest` 使用真实 IDE 项目、变更管理器和脏范围，以及隔离的测试 VCS provider 重现认证失败与外部登录恢复。验证局部刷新即使调用后端成功，仍保留原生全局错误并阻止新改动发布；手动完整刷新必须清除旧异常并发布新改动，后续真正的认证失败仍需报错。设置 `CODEDECK_REAL_VCS_REFRESH=1` 后运行 `./gradlew --no-configuration-cache -I tools/annotation-layout-test.init.gradle :test --tests com.codexgui.changelist.vcs.NativeVcsRefreshIntegrationTest`；普通测试默认跳过，不访问用户的 P4 服务或票据。
+
 Windows 也可以使用一键打包脚本：
 
 ```powershell

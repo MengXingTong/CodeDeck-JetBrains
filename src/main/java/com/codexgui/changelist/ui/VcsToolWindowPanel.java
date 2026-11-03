@@ -26,7 +26,6 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.ui.JBUI;
-import com.intellij.vcsUtil.VcsUtil;
 import com.codexgui.changelist.core.*;
 import com.codexgui.changelist.settings.*;
 import com.codexgui.changelist.vcs.*;
@@ -58,6 +57,9 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
     private CancellablePromise<PreparedSnapshot> snapshotPromise;
     private volatile boolean disposed;
     private boolean snapshotAgain, vcsRefreshing, diffBusy, fileActionBusy, hasSnapshot;
+    private volatile long vcsSnapshotVersion;
+    private String lastVcsRefresh = "";
+    private boolean lastVcsRefreshFailed;
     private boolean scanUnopenedEnabled;
     private ScheduledFuture<?> polling;
     private int pollingGeneration;
@@ -122,7 +124,18 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         var bus = project.getMessageBus().connect(this);
         bus.subscribe(ChangeListListener.TOPIC, new ChangeListListener() {
             private void updated() { queueSnapshot(); }
-            @Override public void changeListUpdateDone() { fileOperations.nativeUpdateCompleted(); updated(); }
+            @Override public void changeListUpdateDone() {
+                fileOperations.nativeUpdateCompleted();
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (expired()) return;
+                    // A successful refresh from the IDE also supersedes our previous failure.
+                    if (!vcsRefreshing && lastVcsRefreshFailed && NativeVcsRefresh.problem(project).isBlank()) {
+                        lastVcsRefresh = "";
+                        lastVcsRefreshFailed = false;
+                    }
+                    queueSnapshot();
+                });
+            }
             @Override public void changeListAdded(ChangeList list) { updated(); }
             @Override public void changeListRemoved(ChangeList list) { updated(); }
             @Override public void changeListChanged(ChangeList list) { updated(); }
@@ -138,6 +151,9 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         });
         bus.subscribe(ProjectLevelVcsManager.VCS_CONFIGURATION_CHANGED, () -> {
             fileOperations.clear();
+            lastVcsRefresh = "";
+            lastVcsRefreshFailed = false;
+            vcsSnapshotVersion++;
             queueSnapshot();
             ApplicationManager.getApplication().invokeLater(() -> { if (!expired()) refreshUnopened(true); });
         });
@@ -363,14 +379,8 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (scope.root() == null || !ProjectLevelVcsManager.getInstance(project).hasActiveVcss()) {
             requestSnapshot(); return;
         }
-        setStatus(UiMessages.message("已请求 IDE 原生 VCS 刷新，等待变更更新…"));
-        // Invoke the native refresh action so each supported IDE performs its own preparation.
-        var nativeRefresh = ActionManager.getInstance().getAction("Vcs.RefreshStatuses");
-        if (nativeRefresh != null) ActionManager.getInstance().tryToExecute(nativeRefresh, null, tree, "CodeDeck.Changes.Refresh", true);
-        else refreshVcs(scope.root(), true);
+        refreshVcs(scope.root(), true, true);
         refreshUnopened(true);
-        // The action launches asynchronously. An invokeAfterUpdate here could finish before that
-        // launch starts; ChangeListListener.changeListUpdateDone rebuilds the tree on completion.
     }
 
     private void refreshProjectScope() {
@@ -392,6 +402,9 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         requestSnapshot();
     }
     private void refreshVcs(Path path, boolean directory) {
+        refreshVcs(path, directory, false);
+    }
+    private void refreshVcs(Path path, boolean directory, boolean prepare) {
         if (expired() || vcsRefreshing) return;
         var scope = ProjectScope.forBasePath(project.getBasePath());
         if (scope.root() == null || (!scope.contains(path) && !scope.root().equals(path.normalize()))) {
@@ -399,15 +412,21 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         }
         if (!ProjectLevelVcsManager.getInstance(project).hasActiveVcss()) { requestSnapshot(); return; }
         vcsRefreshing = true;
+        vcsSnapshotVersion++;
         setStatus(UiMessages.message("正在刷新 IDE 版本控制状态…"));
-        // The active Perforce/Git provider performs this refresh using its existing connection and credentials.
-        var dirty = VcsDirtyScopeManager.getInstance(project);
-        var filePath = VcsUtil.getFilePath(path, directory);
-        if (directory) dirty.dirDirtyRecursively(filePath); else dirty.fileDirty(filePath);
-        ChangeListManager.getInstance(project).invokeAfterUpdate(true, () -> {
+        NativeVcsRefresh.refresh(project, path, directory, prepare, error -> {
             vcsRefreshing = false;
+            vcsSnapshotVersion++;
+            lastVcsRefreshFailed = !error.isBlank();
+            lastVcsRefresh = error.isBlank()
+                    ? refreshCompletedStatus()
+                    : UiMessages.message("VCS 刷新失败（保留上次结果）：") + error;
             if (!expired()) requestSnapshot();
         });
+    }
+
+    private static String refreshCompletedStatus() {
+        return UiMessages.message("VCS 刷新完成 ") + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
     }
 
     private void requestSnapshot() {
@@ -415,6 +434,7 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         if (snapshotPromise != null) { snapshotAgain = true; return; }
         boolean showUnversioned = settings.snapshot().showUnversioned;
         long operationRevision = fileOperations.revision();
+        long snapshotVersion = vcsSnapshotVersion;
         var promise = ReadAction.nonBlocking(() -> {
             var nativeSnapshot = NativeChanges.read(project, showUnversioned);
             var ignores = settings.snapshot().ignoreRules(ProjectScope.of(nativeSnapshot.projectRoot()));
@@ -422,7 +442,8 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
             var model = ChangeTree.build(snapshot.groups(), snapshot.projectRoot(), ProgressManager::checkCanceled);
             Map<String, DefaultMutableTreeNode> nodes = new HashMap<>();
             return new PreparedSnapshot(snapshot, swingNode(model, nodes), nodes);
-        }).expireWhen(() -> expired() || fileOperations.revision() != operationRevision).expireWith(this)
+        }).expireWhen(() -> expired() || fileOperations.revision() != operationRevision
+                || vcsSnapshotVersion != snapshotVersion).expireWith(this)
                 .finishOnUiThread(ModalityState.nonModal(), prepared -> {
                     if (!expired()) updateTree(prepared);
                 }).submit(AppExecutorUtil.getAppExecutorService());
@@ -487,10 +508,13 @@ final class VcsToolWindowPanel extends JPanel implements Disposable {
         tree.getEmptyText().setText(!scoped ? UiMessages.message("请打开具体项目目录") : configured
                 ? UiMessages.message("当前项目没有本地 VCS 变更") : UiMessages.message("请先在 IDE 的 Version Control 中配置 Perforce / Git"));
         if (!scoped) { setStatus(UiMessages.message("未读取变更：无法确定具体项目目录")); return; }
-        if (!diffBusy && !vcsRefreshing && !fileActionBusy) setStatus(configured
-                ? (scanStatus.isBlank() ? UiMessages.message("已同步 ") + LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"))
-                + UiMessages.message(" · 双击文本文件查看 diff") : scanStatus)
-                : UiMessages.message("点击工具栏的版本控制连接按钮，复用 IDE 配置"));
+        if (!diffBusy && !vcsRefreshing && !fileActionBusy) {
+            String error = configured ? NativeVcsRefresh.problem(project) : "";
+            setStatus(!configured ? UiMessages.message("点击工具栏的版本控制连接按钮，复用 IDE 配置")
+                    : !error.isBlank() ? UiMessages.message("VCS 刷新失败（保留上次结果）：") + error
+                    : !lastVcsRefresh.isBlank() ? lastVcsRefresh + (scanStatus.isBlank() ? "" : " · " + scanStatus)
+                    : scanStatus.isBlank() ? UiMessages.message("已读取 IDE 缓存 · 请刷新获取最新变更") : scanStatus);
+        }
     }
 
     private static DefaultMutableTreeNode swingNode(ChangeTree.Node node, Map<String, DefaultMutableTreeNode> nodes) {

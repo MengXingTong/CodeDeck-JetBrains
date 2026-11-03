@@ -37,7 +37,7 @@ class Rpc:
         self.notifications = queue.Queue()
         self.serial = 0
         threading.Thread(target=self._read, daemon=True).start()
-        self.call("initialize", {"clientInfo": {"name": name, "version": "2.1.5"},
+        self.call("initialize", {"clientInfo": {"name": name, "version": "2.1.7"},
                                  "capabilities": {"experimentalApi": True}})
         self.process.stdin.write(json.dumps({"method": "initialized"}) + "\n")
         self.process.stdin.flush()

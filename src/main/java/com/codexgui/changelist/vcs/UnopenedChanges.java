@@ -16,6 +16,8 @@ public interface UnopenedChanges {
     record Entry(Path path, ChangedFile.Kind kind, boolean binary, NativeChanges.DiffTarget target) {}
     List<Entry> snapshot();
     String status();
+    default String nativeRefreshProblem() { return ""; }
+    default void invalidateNativeRefresh() {}
     void refresh(boolean force);
     void refreshPaths(List<Path> paths);
     void operationCompleted(FileVcsOperations.Result result);
