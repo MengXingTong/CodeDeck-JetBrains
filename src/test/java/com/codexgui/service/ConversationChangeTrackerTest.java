@@ -47,7 +47,33 @@ final class ConversationChangeTrackerTest {
         tracker.revertAll("session"); assertEquals("background log\n", Files.readString(log));
     }
 
-    @Test void projectIgnoresAndRestoredPathsApplyOnlyToInferredChanges() throws IOException {
+    @Test void configuredGitignoreRulesApplyToEveryCaptureChannel() throws IOException {
+        var log = write("runtime.log", "before\n");
+        var important = write("important.log", "important before\n");
+        var rules = new com.codexgui.changelist.core.IgnoreRules(com.codexgui.changelist.core.ProjectScope.of(root),
+            List.of(), "*.log\n!important.log\n", List.of(), List.of());
+        var tracker = new ConversationChangeTracker(root, () -> true,
+            (path, directory) -> directory ? rules.canSkipDirectory(path) : rules.isIgnored(path));
+
+        tracker.commandStarted("session", "command", "Set-Content runtime.log command", null);
+        Files.writeString(log, "command\n");
+        tracker.commandCompleted("session", "command");
+        assertTrue(tracker.trackBeforeWrite("session", log.toString()));
+        tracker.patchStarted("session", "patch", List.of(log.toString()));
+        Files.writeString(log, "after\n");
+        tracker.patchCompleted("session", "patch");
+        tracker.trackProviderDiff("session", textDiff("runtime.log", "command", "after"));
+        write("added.log", "new\n");
+        tracker.trackProviderFile("session", "added.log", "add", "new\n");
+
+        assertTrue(tracker.listSummaries("session").isEmpty());
+        assertTrue(tracker.trackBeforeWrite("session", important.toString()));
+        Files.writeString(important, "important after\n");
+        assertEquals(List.of(important), tracker.listSummaries("session").stream()
+            .map(ConversationChangeTracker.ChangeSummary::path).toList());
+    }
+
+    @Test void projectIgnoresAndRestoredPathsApplyToExplicitChanges() throws IOException {
         Files.createDirectories(root.resolve("Source/Custom"));
         var kept = write("Source/Custom/keep.cpp", "keep before\n");
         var excluded = write("Source/Custom/excluded.cpp", "excluded before\n");
@@ -61,10 +87,16 @@ final class ConversationChangeTrackerTest {
         assertEquals(List.of(kept), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
         tracker.revertAll("session"); assertEquals("background\n", Files.readString(excluded));
 
+        assertTrue(tracker.trackBeforeWrite("session", excluded.toString()));
         tracker.patchStarted("session", "patch", List.of(excluded.toString()));
-        Files.writeString(excluded, "explicit patch\n"); tracker.patchCompleted("session", "patch");
-        assertEquals(List.of(excluded), tracker.listSummaries("session").stream().map(ConversationChangeTracker.ChangeSummary::path).toList());
-        tracker.revertAll("session"); assertEquals("background\n", Files.readString(excluded));
+        Files.writeString(excluded, "ignored patch\n"); tracker.patchCompleted("session", "patch");
+        tracker.trackProviderFile("session", excluded.toString(), "update", "@@ -1 +1 @@\n-background\n+ignored patch\n");
+        assertTrue(tracker.listSummaries("session").isEmpty());
+
+        assertTrue(tracker.trackBeforeWrite("session", kept.toString()));
+        Files.writeString(kept, "explicit restored edit\n");
+        assertEquals(List.of(kept), tracker.listSummaries("session").stream()
+            .map(ConversationChangeTracker.ChangeSummary::path).toList());
     }
 
     @Test void resolvesGitRevertFilesInThePluginRuntime() throws Exception {

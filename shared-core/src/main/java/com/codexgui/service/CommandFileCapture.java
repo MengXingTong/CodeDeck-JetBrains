@@ -139,8 +139,9 @@ public final class CommandFileCapture {
             try {
                 // A missing regular file is a possible addition. Directories and links are never snapshotted.
                 if (metadata(path) || Files.isSymbolicLink(path) || Files.isDirectory(path)) continue;
-                // Ignore only inferred paths; a recognized direct write keeps its real baseline.
-                if (!explicitFiles.contains(path) && ignored(path, false)) continue;
+                // Project Gitignore rules apply to every capture channel. Built-in generated-artifact
+                // filters remain limited to inferred paths so intentional non-ignored writes stay reviewable.
+                if (explicitFiles.contains(path) ? projectIgnores.test(path, false) : ignored(path, false)) continue;
                 var early = preserveFormat ? null : turnBaseline.get(path);
                 if (early != null) {
                     before.add(early);

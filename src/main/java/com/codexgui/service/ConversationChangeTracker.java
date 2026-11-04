@@ -124,6 +124,9 @@ public final class ConversationChangeTracker implements Disposable {
     public synchronized boolean trackBeforeWrite(String sessionId, String reportedPath) {
         var target = resolveReportedPath(reportedPath);
         if (target == null) return false;
+        // Claude's pre-write hook treats true as permission to continue. Ignored files are writable,
+        // but deliberately receive no baseline and therefore never enter the captured Changes.
+        if (captureIgnored(target)) return true;
         var current = readCurrent(target);
         if (current.present() && current.hash() == null) return false;
         // File tools with a pre-write hook (Claude) are finalized when the live turn ends.
@@ -166,6 +169,7 @@ public final class ConversationChangeTracker implements Disposable {
         var reserved = new LinkedHashMap<Path, Baseline>();
         var baselines = baselinesBySession.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
         for (var before : capture.snapshot(id)) {
+            if (captureIgnored(before.path())) continue;
             var baseline = new Baseline(before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
                 before.bytes(), hash(before.bytes()), null);
             baselines.putIfAbsent(before.path(), baseline);
@@ -209,7 +213,7 @@ public final class ConversationChangeTracker implements Disposable {
         var baselines = baselinesBySession.computeIfAbsent(key, ignored -> new LinkedHashMap<>());
         for (var reported : reportedPaths) {
             var path = resolveReportedPath(reported);
-            if (path == null || reserved.size() >= 128) continue;
+            if (path == null || captureIgnored(path) || reserved.size() >= 128) continue;
             var current = readDiskCurrent(path);
             if (current.bytes() != null && current.bytes().length > 16L * 1024 * 1024 - bytes) continue;
             if (current.bytes() != null) bytes += current.bytes().length;
@@ -239,6 +243,7 @@ public final class ConversationChangeTracker implements Disposable {
         if (changes.isEmpty()) return;
         var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
         for (var before : changes) {
+            if (captureIgnored(before.path())) continue;
             if (before.preserveFormat()) preserveFormat(before.path(), before.bytes());
             baselines.putIfAbsent(before.path(), new Baseline(
                 before.exists() ? BaselineKind.PRESENT : BaselineKind.ABSENT,
@@ -450,6 +455,7 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     private boolean trackProviderBaseline(String sessionId, Path target, Baseline baseline) {
+        if (captureIgnored(target)) return false;
         var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
         var current = baselines.get(target);
         if (current != null && (baseline.providerTurnKey() == null
@@ -460,6 +466,7 @@ public final class ConversationChangeTracker implements Disposable {
     }
 
     private boolean trackBaseline(String sessionId, Path target, Baseline baseline) {
+        if (captureIgnored(target)) return false;
         var baselines = baselinesBySession.computeIfAbsent(sessionId, ignored -> new LinkedHashMap<>());
         if (baselines.putIfAbsent(target, baseline) != null) return false;
         fireChanged(sessionId);
@@ -660,6 +667,15 @@ public final class ConversationChangeTracker implements Disposable {
 
     private Path normalizePath(Path path) {
         return pathPolicy.normalize(path);
+    }
+
+    private boolean captureIgnored(Path path) {
+        try {
+            return captureIgnores.get().test(path, false);
+        } catch (RuntimeException ignored) {
+            // A malformed optional ignore setting must not hide a real edit.
+            return false;
+        }
     }
 
     private boolean matchesKind(ChangeEntry.Kind kind, boolean currentPresent) {

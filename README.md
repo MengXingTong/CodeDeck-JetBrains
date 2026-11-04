@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Current build: **2.1.7**.
+Current build: **2.1.8**.
 
 **Understand and review code in JetBrains IDEs, with AI assistance.**
 
@@ -23,7 +23,7 @@ File context follows the active IDE editor across new and switched chat tabs, in
 
 During a running task, Send and the send shortcut add messages to the ordered queue above the input box. Edit or delete any unsent message, or click **Steer now** on the first item to guide the current Codex turn immediately. An item being edited waits for Save or Cancel before sending; files, attachments, and captured editor context are preserved. Messages enter the conversation when sent.
 
-Command fallback capture filters logs, build outputs, and paths excluded by the project's **ChangeList → Ignore list / resume tracking** rules. Known read-only commands do not claim concurrent file changes. Explicit patches, file edits, and recognized writes to literal file paths remain captured, including ignored files. Rule changes apply to subsequent turns.
+Every capture channel honors the Gitignore-style rules configured under **ChangeList → Ignore list / resume tracking**, including templates, custom patterns, literal ignores, and restored exceptions. This applies to explicit patches and file edits as well as recognized shell writes, so adding `*.log` excludes logs from the chat's Changes while a later `!important.log` or restored path can include a specific file again. Command inference additionally filters common build outputs, and known read-only commands do not claim concurrent file changes. Rule changes apply to subsequent turns.
 
 Inline Python scripts can also use file-name templates such as `f'Source/Ability/G{kind}GameplayAbility.cpp'`. Capture matches the template within its fixed subdirectory, preserving the original contents for Diff and undo. Long scripts in Code Mode tool calls are supported; matching keeps the same capture limits and ignore rules.
 

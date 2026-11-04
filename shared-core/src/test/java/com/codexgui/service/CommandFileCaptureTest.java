@@ -125,17 +125,18 @@ class CommandFileCaptureTest {
         }
     }
 
-    @Test void mixedReadsAndWritesOnlyReserveTheWritingSegmentsAndExplicitArtifactsStillWork() throws Exception {
+    @Test void mixedReadsAndWritesApplyProjectIgnoresToExplicitPaths() throws Exception {
         var source = Files.createDirectories(root.resolve("Source"));
         var read = Files.writeString(source.resolve("read.cpp"), "read before");
         var log = Files.writeString(source.resolve("explicit.log"), "log before");
         var library = Files.write(source.resolve("explicit.lib"), new byte[]{1, 0, 2});
-        var capture = new CommandFileCapture(root, (path, directory) -> true);
+        var capture = new CommandFileCapture(root, (path, directory) -> !directory
+            && path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".log"));
         capture.started("mixed", "Get-Content Source/read.cpp; Set-Content Source/explicit.log after; Remove-Item Source/explicit.lib", null);
-        assertEquals(Set.of(log, library), capture.snapshot("mixed").stream().map(CommandFileCapture.Before::path)
+        assertEquals(Set.of(library), capture.snapshot("mixed").stream().map(CommandFileCapture.Before::path)
             .collect(java.util.stream.Collectors.toSet()));
         Files.writeString(read, "concurrent user edit"); Files.writeString(log, "after"); Files.delete(library);
-        assertEquals(Set.of(log, library), capture.completed("mixed").stream().map(CommandFileCapture.Before::path)
+        assertEquals(Set.of(library), capture.completed("mixed").stream().map(CommandFileCapture.Before::path)
             .collect(java.util.stream.Collectors.toSet()));
     }
 
@@ -152,9 +153,10 @@ class CommandFileCaptureTest {
         assertEquals(List.of(other), capture.completed("execute").stream().map(CommandFileCapture.Before::path).toList());
     }
 
-    @Test void explicitWritesInGeneratedDirectoriesAndShellRedirectionBypassInferredIgnores() throws Exception {
+    @Test void configuredGitignoreRulesApplyToExplicitWritesAndShellRedirection() throws Exception {
         var source = Files.createDirectories(root.resolve("Saved/Logs"));
-        var capture = new CommandFileCapture(root);
+        var capture = new CommandFileCapture(root, (path, directory) -> !directory
+            && path.getFileName().toString().toLowerCase(java.util.Locale.ROOT).endsWith(".log"));
         for (var command : List.of("echo entry > Saved/Logs/output.log",
             "Get-Content input.txt | Out-File Saved/Logs/output.log",
             "[IO.File]::WriteAllText('Saved/Logs/output.log', 'entry')",
@@ -163,8 +165,7 @@ class CommandFileCaptureTest {
             Files.deleteIfExists(source.resolve("output.log"));
             capture.started("write", command, null);
             Files.writeString(source.resolve("output.log"), "entry");
-            assertEquals(List.of(source.resolve("output.log")), capture.completed("write").stream()
-                .map(CommandFileCapture.Before::path).toList(), command);
+            assertTrue(capture.completed("write").isEmpty(), command);
         }
     }
 

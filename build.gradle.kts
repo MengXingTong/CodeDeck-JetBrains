@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.codexgui"
-version = "2.1.7"
+version = "2.1.8"
 
 repositories {
     mavenCentral()
